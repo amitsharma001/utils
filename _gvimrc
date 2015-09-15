@@ -13,7 +13,7 @@ if has("gui_running")
   if has("gui_gtk2")
     set guifont=Inconsolata\ 12
   elseif has("gui_macvim")
-    set guifont=Menlo\ Regular:h14
+    set guifont=Menlo\ Regular:h12
   elseif has("gui_win32")
     set guifont=Consolas:h11:cANSI
   endif
@@ -52,6 +52,6 @@ set dir=~/editorBCKP  " create all swap files in one directory
 " Smart tabs
 set expandtab
 set smarttab
-set shiftwidth=4
+set shiftwidth=2
 
 
