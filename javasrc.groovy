@@ -11,6 +11,7 @@ class SourceFile {
 @Log
 class JOptProcessor {
   String basedir, destdir
+  boolean rev
   def files = [], warnings = [], classpath = [], optfiles = []
 
   def processFiles() {
@@ -73,6 +74,7 @@ class JOptProcessor {
         log.info "Creating package ${it.packageName}" 
         Files.createDirectories(destFile.getParent())
       }
+      if(rev) Files.copy(destFile, srcFile, StandardCopyOption.REPLACE_EXISTING)
       Files.copy(srcFile, destFile, StandardCopyOption.REPLACE_EXISTING)
     }
     Files.createDirectories(Paths.get(destdir,'lib'))
@@ -90,6 +92,7 @@ def process(args) {
     h longOpt: 'help', 'Show usage information.'
     b longOpt: 'basedir', args: 1, argName: 'basedir', 'The base dir from which to resolve all relative paths. Defaults to current dir if not set.'
     d longOpt: 'destdir', args: 1, argName: 'destdir', 'The destination dir where the source files are copied to. Defaults to .\\jar.'
+    r longOpt: 'reverse', args: 0, argName: 'reverse', 'Copy the files back from where the came from dest -> src.'
   }
   def options = cli.parse(args)
   if(!options || options.h || args.length == 0) {
@@ -100,10 +103,12 @@ def process(args) {
   File currdir = new File(".")
   String basedir = currdir.getAbsolutePath()
   String destdir = Paths.get(currdir.getAbsolutePath(),"jar").toAbsolutePath()
+  boolean rev = false
 
   if(options.b) basedir = options.b
   if(options.d) destdir = options.d
-  JOptProcessor jop = new JOptProcessor(basedir:basedir,destdir:destdir,optfiles:extraArgs)
+  if(options.r) rev = true
+  JOptProcessor jop = new JOptProcessor(basedir:basedir,destdir:destdir,optfiles:extraArgs,rev:rev)
   jop.processFiles()
   jop.createJavaPackage()
 }
