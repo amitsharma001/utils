@@ -1,5 +1,48 @@
-[
-{"name":"sfr","connection":"jdbc:salesforce:User=support@nsoftware.com;Password=!rssbus;LogFile=D:\\Software\\Tools\\utils\\sflog.txt;Verbosity=2","driver":"cdata.jdbc.salesforce.SalesforceDriver","jar":"C:\\Program Files\\CData\\CData JDBC Driver for Salesforce 2015\\lib\\cdata.jdbc.salesforce.jar"},
-{"name":"mysqlr","connection":"jdbc:mysql:User=root;Password=test;Database=test;Server=M;Database=test","driver":"cdata.jdbc.mysql.MySQLDriver","jar":"C:\\Program Files\\CData\\CData JDBC Driver for MySQL 2016\\lib\\cdata.jdbc.mysql.jar"},
-{"name":"mongo","connection":"jdbc:mongodb:Server=BEN-PC;Port=27117;User=test;Password=test;Database=test;LogFile=D:\\Software\\Tools\\utils\\mongo.txt;Verbosity=2","driver":"cdata.jdbc.mongodb.MongoDBDriver","jar":"C:\\Program Files\\CData\\CData JDBC Driver for MongoDB 2016\\lib\\cdata.jdbc.mongodb.jar"}
-]
+{
+	"config": {
+		"logdir": "D:\\Logs\\",
+		"verbosity" : "2",
+                "cacheconnection" : "jdbc:postgresql://localhost:5432/CacheTest?user=test&password=test",
+                "cachedriver" : "org.postgresql.Driver", 
+                "cachejar" : "D:\\Software\\DbVisualizer\\jdbc\\postgresql\\postgresql.jar"
+	},
+	"connections": [
+		{
+			"name":"sfr",
+			"connection":"jdbc:salesforce:User=support@nsoftware.com;Password=!rssbus;",
+			"driver":"cdata.jdbc.salesforce.SalesforceDriver",
+			"jar": [
+				"C:\\Program Files\\CData\\CData JDBC Driver for Salesforce 2015\\lib\\cdata.jdbc.salesforce.jar",
+				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderSalesforce\\kits\\jdbc\\lib\\cdata.jdbc.salesforce.jar",
+				"C:\\dev\\rssbus\\trunk\\Release\\ProviderSalesforceV4\\kits\\jdbc\\lib\\cdata.jdbc.salesforce.jar"
+			]
+		},
+		{
+			"name":"mysql",
+			"connection":"jdbc:mysql:User=root;Password=test;Database=test;Server=M;Database=test",
+			"driver":"cdata.jdbc.mysql.MySQLDriver",
+			"jar": [
+				"C:\\Program Files\\CData\\CData JDBC Driver for MySQL 2016\\lib\\cdata.jdbc.mysql.jar",
+				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderMySQL\\kits\\jdbc\\lib\\cdata.jdbc.mysql.jar"
+			]
+		},
+		{
+			"name":"mongo",
+			"connection":"jdbc:mongodb:Server=BEN-PC;Port=27117;User=test;Password=test;Database=test;",
+			"driver":"cdata.jdbc.mongodb.MongoDBDriver",
+			"jar": [
+				"C:\\Program Files\\CData\\CData JDBC Driver for MongoDB 2016\\lib\\cdata.jdbc.mongodb.jar",
+				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderMongoDB\\kits\\jdbc\\lib\\cdata.jdbc.mongodb.jar"
+			]
+		},
+                {
+			"name":"mongom",
+			"connection":"jdbc:mongodb:Server=MITCHGRAW;Port=27017;User=;Password=;Database=test;",
+			"driver":"cdata.jdbc.mongodb.MongoDBDriver",
+			"jar": [
+				"C:\\Program Files\\CData\\CData JDBC Driver for MongoDB 2016\\lib\\cdata.jdbc.mongodb.jar",
+				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderMongoDB\\kits\\jdbc\\lib\\cdata.jdbc.mongodb.jar"
+			]
+                }
+	]
+}

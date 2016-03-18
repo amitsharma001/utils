@@ -23,6 +23,8 @@ endif
 
 " Always show current position
 set ruler
+set showcmd
+set wildmenu
 
 "The commandbar is 2 high
 "set cmdheight=2
@@ -55,3 +57,4 @@ set smarttab
 set shiftwidth=2
 set autoindent
 set hidden
+set path=$PWD/**
