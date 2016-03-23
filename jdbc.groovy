@@ -1,11 +1,14 @@
 import groovy.sql.Sql
 import groovy.json.*
+import groovy.time.*
 
-static showResults(resultSet,cols) { 
+static showResults(resultSet,cols, pagesize = 200) { 
   def totalLength = 0
   def maxWidth = 25
   def border = ''
   def header = ''
+  def pagesizeInt = 200
+  if(pagesize != null) pagesizeInt = pagesize as int
 
   cols.each { k, v -> totalLength += v }
   if( totalLength < 300 ) maxWidth = 50
@@ -22,6 +25,7 @@ static showResults(resultSet,cols) {
   print border + header + border
   int count = 0
   def readToEnd = true;
+
   while(resultSet.next()) {
     count++
     cols.each { k, v ->
@@ -31,7 +35,7 @@ static showResults(resultSet,cols) {
       printf "|%-${width+1}s", value // We had an extra space in the header
     }
     print "|\n"
-    if(count%200 == 0) {
+    if(pagesizeInt != -1 && count % pagesizeInt == 0) {
       print border
       print "$count rows. Do you want to see more [Y/N]? "
       if(System.console().readLine().toLowerCase() == 'y') {
@@ -87,12 +91,12 @@ static getPK(sql, table) {
   return pk
 }
 
-static pickColumns(sql, metadata) {
+static pickColumns(sql, metadata, showKeys = false) {
   def selectedCols = [:]
   def allCols = [:]
   def pk = []
   for(int i=1; i<=metadata.getColumnCount(); i++) {
-    if(i == 1) pk = getPK(sql,metadata.getTableName(i))
+    if(i == 1 && showKeys) pk = getPK(sql,metadata.getTableName(i))
     def size = metadata.getPrecision(i)
     allCols[metadata.getColumnName(i)] = size > 5? size: 5
   }
@@ -194,9 +198,12 @@ static main(String[] args) {
           def pvalue = System.console().readLine "${name}: "
           params[name] = pvalue
         }
+        def timeStart = new Date()
         sql.query(command, params) { resultSet ->  
-          showResults(resultSet, pickColumns(sql, resultSet.getMetaData()))
-        }
+          showResults(resultSet, pickColumns(sql, resultSet.getMetaData(), connJ.config.showkeys), connJ.config.pagesize)
+        } 
+        TimeDuration duration = TimeCategory.minus(new Date(), timeStart)
+        println "Total Time: $duration"
       } else if(sql != null && (commandA[0] == "insert" || commandA[0] == "update" || commandA[0] == "delete" || commandA[0] == "cache" || commandA[0] == "replicate")) {
           def params = [:]
           command.findAll(/:(\w*)/) { match, name ->
