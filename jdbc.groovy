@@ -15,8 +15,8 @@ static showResults(resultSet,cols, pagesize = 200) {
   cols.each { k, v ->
     def width = v < maxWidth ? v : maxWidth
     def cname = k.length() > width? k[0..(width-2)] + ".." :k
-    header <<= sprintf "|%-${width+1}s", cname
-    border <<= "+"+"-"*(width+1)
+    header <<= sprintf "|%-${width+2}s", cname
+    border <<= "+"+"-"*(width+2)
   }
 
   header <<= "|\n"
@@ -32,7 +32,7 @@ static showResults(resultSet,cols, pagesize = 200) {
       def value = resultSet.getObject(k) == null? "NULL" : resultSet.getObject(k).toString()
       def width = v < maxWidth ? v : maxWidth
       value = value.length() > width ? value[0..(width-3)] + ".." : value
-      printf "|%-${width+1}s", value // We had an extra space in the header
+      printf "| %-${width+1}s", value // We had an extra space in the header
     }
     print "|\n"
     if(pagesizeInt != -1 && count % pagesizeInt == 0) {
