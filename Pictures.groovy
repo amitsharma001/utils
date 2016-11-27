@@ -1,10 +1,13 @@
 @GrabResolver(name='snapshot', root='https://repository.apache.org/content/repositories/snapshots/')
 @Grab(group='org.apache.commons', module='commons-imaging', version='1.0-SNAPSHOT')
+@Grab(group='commons-io', module='commons-io', version='2.5')
 
 
 import groovy.io.*
+import groovy.time.*
 import java.nio.file.*
 import groovy.json.*
+import org.apache.commons.io.FilenameUtils
 import groovy.util.logging.Log
 import static groovyx.gpars.GParsPool.withPool
 
@@ -55,6 +58,7 @@ class ImageOrganizer {
 
   String srcD = null
   String destD = null
+  def excludes = []
   int totalfiles = 0
 
   def getTagValue(def metadata, def tagInfo) {
@@ -88,7 +92,14 @@ class ImageOrganizer {
   def processFiles() {
     Path p = Paths.get(srcD)
     def filelist = []
-    p.eachFileRecurse() { filelist.add(it.toString()) }
+    p.eachFileRecurse(FileType.FILES) {
+      String fname = it.toString()
+      boolean exclude = false
+      excludes.each {
+        if(fname.endsWith(it)) exclude = true
+      }
+      if(!exclude) filelist.add(fname) 
+    }
     totalfiles = filelist.size()
     withPool() {
       filelist.each { processFile(it) }
@@ -96,32 +107,33 @@ class ImageOrganizer {
   }
 
   def processFile(imageFile) {
-    File f = new File(imageFile.toString())
+    File f = new File(imageFile)
 
     ImageFile image = new ImageFile()
     image.file = f.getAbsolutePath()
   
     try {
       ImageMetadata metadata = Imaging.getMetadata(f)
-      String date = getTagValue(metadata, ExifTagConstants.EXIF_TAG_DATE_TIME_ORIGINAL)[1..-2]
-      if(date.length() > 15) image.date = Date.parse("yyyy:MM:dd hh:mm:ss",date)
-      def exifMetadata = metadata.getExif()
-      if (null != exifMetadata) {
-        def gpsInfo = exifMetadata.getGPS()
-        if(gpsInfo != null) {
-          image.gpsDescription = gpsInfo.toString()
-          image.longitude = gpsInfo.getLongitudeAsDegreesEast()
-          image.latitude = gpsInfo.getLatitudeAsDegreesNorth()
+      if( metadata != null ) {
+        String date = getTagValue(metadata, ExifTagConstants.EXIF_TAG_DATE_TIME_ORIGINAL)[1..-2]
+        if(date.length() > 15) image.date = Date.parse("yyyy:MM:dd hh:mm:ss",date)
+        def exifMetadata = metadata.getExif()
+        if (null != exifMetadata) {
+          def gpsInfo = exifMetadata.getGPS()
+          if(gpsInfo != null) {
+            image.gpsDescription = gpsInfo.toString()
+            image.longitude = gpsInfo.getLongitudeAsDegreesEast()
+            image.latitude = gpsInfo.getLatitudeAsDegreesNorth()
+          }
         }
       }
-
-      image.srcFile = Paths.get(imageFile.toString())
+      image.srcFile = Paths.get(imageFile)
       if(image.date == null) {
         image.destFile = Paths.get(destD,"UNDATED",image.srcFile.getFileName().toString())
         image.dateHash = "UNDATED" + image.srcFile.getFileName().toString()
       }
       else {
-        image.destFile = Paths.get(destD,image.date.format("yyyy"),image.date.format("MMM"),image.date.format("HH_mm_ss")+".jpg")
+        image.destFile = Paths.get(destD,image.date.format("yyyy"),image.date.format("MMM"),image.date.format("HH_mm_ss")+"."+FilenameUtils.getExtension(imageFile))
         image.dateHash = image.date.format("yyyy") + "_"+ image.date.format("MMM") + "_"+ image.date.format("HH_mm_ss")
       }
       image.foundEXIF = true
@@ -140,6 +152,7 @@ def cli = new CliBuilder(usage:'Pictures.groovy -s SourceDirectory -d Destinatio
 cli.with {
   h longOpt: 'help', 'Show usage information.'
   s longOpt: 'source', args: 1, argName: 'src', 'The source directory in which to look for image files.'
+  e longOpt: 'exclude', args: 1, argName: 'exclude', 'The extensions to exclude in the source directory.'
   d longOpt: 'destination', args: 1, argName: 'destination', 'The destination directory where the files are organized based on the date the picture was taken.'
 }
 
@@ -159,6 +172,7 @@ if(options.d) dest = options.d
 if(options.s) src = options.s
 
 def io = new ImageOrganizer(srcD: src, destD: dest)
+if(options.e) io.excludes = options.e.tokenize(",")
 
 Date timeStarted = new Date()
 
@@ -180,6 +194,7 @@ while(keepProcessing) {
     println "exit               Exit the program."
     println "status             Print status."
     println "others             Print the names of the files that were not recognized as images."
+    println "dedup              Find duplicates based on time and report them."
     println "images             Print the names of image files that have been read."
     println "image index        Print the details of the image at index."
     println "copyTest           Prints what the copy operation would do."
@@ -188,8 +203,8 @@ while(keepProcessing) {
     keepProcessing = false
   } else if (cmd[0] == "status") {
     Date now = new Date()
-    double percentDone = ((io.images.size() + io.others.size())/(double)io.totalfiles)*100.0 //
-    println "Time Elapsed: ${now-timeStarted} Files Processed: ${percentDone}"
+    double percentDone = ((((io.images.size() + io.others.size())/(double)io.totalfiles)*10000.0) as int)/100 //
+    println "Time Elapsed: ${TimeCategory.minus(now,timeStarted)} Total Files: ${io.totalfiles} Files Processed (%): ${percentDone}"
     println "Found ${io.images.size()} images and ${io.others.size()} other unrecognized files."
   } else if (cmd[0] == "others") {
     io.others.eachWithIndex { elem, indx -> println "${indx}] $elem" }
