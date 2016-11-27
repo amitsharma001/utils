@@ -1,15 +1,17 @@
 @GrabResolver(name='snapshot', root='https://repository.apache.org/content/repositories/snapshots/')
 @Grab(group='org.apache.commons', module='commons-imaging', version='1.0-SNAPSHOT')
 @Grab(group='commons-io', module='commons-io', version='2.5')
+@Grab(group='commons-lang', module='commons-lang', version='2.6')
 
 
 import groovy.io.*
 import groovy.time.*
-import java.nio.file.*
 import groovy.json.*
-import org.apache.commons.io.FilenameUtils
 import groovy.util.logging.Log
 import static groovyx.gpars.GParsPool.withPool
+import java.nio.file.*
+import org.apache.commons.io.FilenameUtils
+import org.apache.commons.lang.exception.ExceptionUtils
 
 import org.apache.commons.imaging.*
 import org.apache.commons.imaging.common.*
@@ -23,14 +25,15 @@ class ImageFile {
   String file
   String dateHash
   String error = null
+  String errorStack = null
   Path destFile
   Path srcFile
   int size
   boolean foundEXIF
   Date date = null
   String gpsDescription
-  double latitude
-  double longitude
+  double latitude = 0.0
+  double longitude = 0.0
 
   String toString() {
     if(error != null) return "File: $file Error: $error"
@@ -42,10 +45,12 @@ class ImageFile {
   String printDetails() {
     def lines = []
     lines << "File: $file"
-    lines << "Date: $date"
-    lines << "GPS Location: $gpsDescription"
-    lines << "Latitude North: $latitude Longitude East: $longitude" 
+    if(date != null) lines << "Date: $date"
+    if(gpsDescription != null) lines << "GPS Location: $gpsDescription"
+    if(latitude > 0) lines << "Latitude North: $latitude Longitude East: $longitude" 
     lines << "Destination: ${destFile.toString()}" 
+    if(error != null) lines << "Error: $error" 
+    if(errorStack != null) lines << "StackTrace: $errorStack" 
     return lines.join("\r\n")
   }
 }
@@ -54,7 +59,7 @@ class ImageFile {
 class ImageOrganizer {
   Vector images = []
   Vector others = []
-  ConcurrentHashMap map = new ConcurrentHashMap()
+  def dupMap = []
 
   String srcD = null
   String destD = null
@@ -68,13 +73,14 @@ class ImageOrganizer {
   }
   
   def findDuplicates() {
-    withPool() {
-      images.each {
-        Vector v = new Vector()
-        v.add(it)
-        Vector clash = map.putIfAbsent(it.dateHash, v)
-        clash.add(it)
-      }
+    dupMap = [:]
+    images.each {
+      def list = []
+      if(dupMap[it.dateHash] != null) {
+        list = dupMap[it.dateHash]
+      } 
+      list << it
+      dupMap.put(it.dateHash, list)
     }
   }
 
@@ -140,6 +146,7 @@ class ImageOrganizer {
     } catch(all) {
       image.foundEXIF = false
       image.error = all.getMessage()
+      image.errorStack = ExceptionUtils.getStackTrace(all)
     }
 
     if(image.foundEXIF) images.add(image)
@@ -182,7 +189,7 @@ Thread.startDaemon {
 
 
 boolean keepProcessing = true
-def prompt = "io >"
+def prompt = "io> "
 def command = null
 
 while(keepProcessing) {
@@ -210,13 +217,22 @@ while(keepProcessing) {
     io.others.eachWithIndex { elem, indx -> println "${indx}] $elem" }
   } else if (cmd[0] == "images") {
     io.images.eachWithIndex { elem, indx -> println "${indx}] $elem" }
-  } else if (cmd[0] == "image" && cmd.size() > 1 && cmd[1].isInteger()) {
+  } else if (cmd[0] == "dedup") {
+    io.findDuplicates()
+    io.dupMap.each { name, value ->
+      if (value.size()> 1) {
+        println "Duplicate entries for the name $name"
+        value.each { println "-- ${it}" }
+      }
+    }
+  } else if ((cmd[0] == "image" || cmd[0] == "other") && cmd.size() > 1 && cmd[1].isInteger()) {
     int index = cmd[1] as int
-    if(io.images.size() > index) {
-      ImageFile im = io.images[index]
+    def list = (cmd[0] == "image")? io.images : io.others
+    if(list.size() > index) {
+      ImageFile im = list[index]
       println im.printDetails()
     } else {
-      println "There are only ${io.images.size()} images in the processed pool. The index specified [${index}] was higher."
+      println "There are only ${list.size()} files in the {cmd[0]} list. The index specified [${index}] was higher."
     }
   } else {
     println "Invalid command. Please type help to see your options."
