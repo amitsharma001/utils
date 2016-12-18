@@ -1,5 +1,3 @@
-@GrabResolver(name='snapshot', root='https://repository.apache.org/content/repositories/snapshots/')
-@Grab(group='org.apache.commons', module='commons-imaging', version='1.0-SNAPSHOT')
 @Grab(group='org.apache.tika', module='tika-core', version='1.14')
 @Grab(group='org.apache.tika', module='tika-parsers', version='1.14')
 @Grab(group='commons-io', module='commons-io', version='2.5')
@@ -21,10 +19,6 @@ import org.apache.tika.parser.Parser
 import org.apache.tika.metadata.Metadata
 import org.apache.tika.metadata.TikaCoreProperties
 import org.apache.tika.sax.BodyContentHandler
-
-import org.apache.commons.imaging.common.ImageMetadata
-import org.apache.commons.imaging.Imaging
-import org.apache.commons.imaging.formats.tiff.constants.ExifTagConstants
 
 import java.util.concurrent.atomic.*
 import java.util.concurrent.*
@@ -74,12 +68,6 @@ class ImageOrganizer {
   def excludes = []
   int totalfiles = 0
 
-  def getTagValue(def metadata, def tagInfo) {
-    def field = metadata.findEXIFValueWithExactMatch(tagInfo)
-    if( field != null ) return field.getValueDescription()
-    return null
-  }
-  
   def findDuplicates() {
     dupMap = [:]
     images.each {
@@ -167,47 +155,6 @@ class ImageOrganizer {
       }
       if(image.foundEXIF) images.add(image)
       else others.add(image)
-  }
-
-  def processFile(imageFile) {
-    File f = new File(imageFile)
-
-    ImageFile image = new ImageFile()
-    image.file = f.getAbsolutePath()
-  
-    try {
-      ImageMetadata metadata = Imaging.getMetadata(f)
-      if( metadata != null ) {
-        String date = getTagValue(metadata, ExifTagConstants.EXIF_TAG_DATE_TIME_ORIGINAL)[1..-2]
-        if(date.length() > 15) image.date = Date.parse("yyyy:MM:dd hh:mm:ss",date)
-        def exifMetadata = metadata.getExif()
-        if (null != exifMetadata) {
-          def gpsInfo = exifMetadata.getGPS()
-          if(gpsInfo != null) {
-            image.gpsDescription = gpsInfo.toString()
-            image.longitude = gpsInfo.getLongitudeAsDegreesEast()
-            image.latitude = gpsInfo.getLatitudeAsDegreesNorth()
-          }
-        }
-      }
-      image.srcFile = Paths.get(imageFile)
-      if(image.date == null) {
-        image.destFile = Paths.get(destD,"UNDATED",image.srcFile.getFileName().toString())
-        image.dateHash = "UNDATED" + image.srcFile.getFileName().toString()
-      }
-      else {
-        image.destFile = Paths.get(destD,image.date.format("yyyy"),image.date.format("MMM"),image.date.format("HH_mm_ss")+"."+FilenameUtils.getExtension(imageFile))
-        image.dateHash = image.date.format("yyyy") + "_"+ image.date.format("MMM") + "_"+ image.date.format("HH_mm_ss")
-      }
-      image.foundEXIF = true
-    } catch(all) {
-      image.foundEXIF = false
-      image.error = all.getMessage()
-      image.errorStack = ExceptionUtils.getStackTrace(all)
-    }
-
-    if(image.foundEXIF) images.add(image)
-    else others.add(image)
   }
 }
 
