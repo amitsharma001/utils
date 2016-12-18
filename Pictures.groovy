@@ -25,6 +25,7 @@ import java.util.concurrent.*
 
 class ImageFile {
   String file
+  String ftype 
   String dateHash
   String error = null
   String errorStack = null
@@ -38,10 +39,10 @@ class ImageFile {
   double longitude = 0.0
 
   String toString() {
-    if(error != null) return "File: $file Error: $error"
-    if(date == null) return "File: $file"
-    if(gpsDescription == null) return "File: $file Date: $date"
-    return "File: $file Date: $date Lat(E): $latitude Long(N): $longitude"
+    if(error != null) return "File: $file Type: $ftype Error: $error"
+    if(date == null) return "File: $file Type: $ftype"
+    if(gpsDescription == null) return "File: $file Type: $ftype Date: $date"
+    return "File: $file Type: $ftype Date: $date Lat(E): $latitude Long(N): $longitude"
   }
 
   String printDetails() {
@@ -124,13 +125,14 @@ class ImageOrganizer {
       
       try {
         parser.parse(inputstream, handler, metadata, context);
-        //System.out.println(handler.toString());
 
         Date date = metadata.getDate(TikaCoreProperties.CREATED)
+        String ftype = metadata.get(Metadata.CONTENT_TYPE)
         String lat = metadata.get(TikaCoreProperties.LATITUDE)
         String longt = metadata.get(TikaCoreProperties.LONGITUDE)
 
         if(date != null) image.date = date
+        if(ftype != null) image.ftype = ftype
         if(lat != null) image.latitude = lat as double
         if(longt != null) image.longitude = longt as double
         if(lat != null && longt != null) image.gpsDescription = "Latitude: ${lat} Longitude: ${longt}"
@@ -146,7 +148,7 @@ class ImageOrganizer {
           image.dateHash = image.date.format("yyyy") + "_"+ image.date.format("MMM") + 
                             "_"+ image.date.format("d") + image.date.format("HH_mm_ss")
         }
-        image.foundEXIF = true
+        if(ftype.indexOf("octet-stream") == -1) image.foundEXIF = true
 
       } catch(all) {
         image.foundEXIF = false
@@ -205,7 +207,7 @@ while(keepProcessing) {
     println "exit               Exit the program."
     println "status             Print status."
     println "others             Print the names of the files that were not recognized as images."
-    println "dedup              Find duplicates based on time and report them."
+    println "dedup report       Find duplicates based on time and report them."
     println "images             Print the names of image files that have been read."
     println "image index        Print the details of the image at index."
     println "copyTest           Prints what the copy operation would do."
@@ -221,7 +223,7 @@ while(keepProcessing) {
     io.others.eachWithIndex { elem, indx -> println "${indx}] $elem" }
   } else if (cmd[0] == "images") {
     io.images.eachWithIndex { elem, indx -> println "${indx}] $elem" }
-  } else if (cmd[0] == "dedup") {
+  } else if (cmd[0] == "dedup" && cmd[1] == "report") {
     io.findDuplicates()
     io.dupMap.each { name, value ->
       if (value.size()> 1) {
@@ -237,6 +239,10 @@ while(keepProcessing) {
       println im.printDetails()
     } else {
       println "There are only ${list.size()} files in the {cmd[0]} list. The index specified [${index}] was higher."
+    }
+  } else if(cmd[0] == "filter" && cmd.size() > 1) {
+    if(cmd[1] == "type" && cmd.size()>2) {
+      
     }
   } else {
     println "Invalid command. Please type help to see your options."
