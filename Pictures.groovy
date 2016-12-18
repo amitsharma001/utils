@@ -1,5 +1,7 @@
 @GrabResolver(name='snapshot', root='https://repository.apache.org/content/repositories/snapshots/')
 @Grab(group='org.apache.commons', module='commons-imaging', version='1.0-SNAPSHOT')
+@Grab(group='org.apache.tika', module='tika-core', version='1.14')
+@Grab(group='org.apache.tika', module='tika-parsers', version='1.14')
 @Grab(group='commons-io', module='commons-io', version='2.5')
 @Grab(group='commons-lang', module='commons-lang', version='2.6')
 
@@ -13,11 +15,17 @@ import java.nio.file.*
 import org.apache.commons.io.FilenameUtils
 import org.apache.commons.lang.exception.ExceptionUtils
 
-import org.apache.commons.imaging.*
-import org.apache.commons.imaging.common.*
-import org.apache.commons.imaging.formats.jpeg.*
-import org.apache.commons.imaging.formats.tiff.*
-import org.apache.commons.imaging.formats.tiff.constants.*
+import org.apache.tika.parser.AutoDetectParser
+import org.apache.tika.parser.ParseContext
+import org.apache.tika.parser.Parser
+import org.apache.tika.metadata.Metadata
+import org.apache.tika.metadata.TikaCoreProperties
+import org.apache.tika.sax.BodyContentHandler
+
+import org.apache.commons.imaging.common.ImageMetadata
+import org.apache.commons.imaging.Imaging
+import org.apache.commons.imaging.formats.tiff.constants.ExifTagConstants
+
 import java.util.concurrent.atomic.*
 import java.util.concurrent.*
 
@@ -108,8 +116,57 @@ class ImageOrganizer {
     }
     totalfiles = filelist.size()
     withPool() {
-      filelist.each { processFile(it) }
+      filelist.each { processFileTika(it) }
     }
+  }
+
+  def processFileTika(imageFile) {
+      File file = new File(imageFile);
+      
+      ImageFile image = new ImageFile()
+      image.file = file.getAbsolutePath()
+      image.srcFile = Paths.get(imageFile)
+
+      //Parser method parameters
+      Parser parser = new AutoDetectParser();
+      BodyContentHandler handler = new BodyContentHandler();
+      Metadata metadata = new Metadata();
+      FileInputStream inputstream = new FileInputStream(file);
+      ParseContext context = new ParseContext();
+      
+      try {
+        parser.parse(inputstream, handler, metadata, context);
+        //System.out.println(handler.toString());
+
+        Date date = metadata.getDate(TikaCoreProperties.CREATED)
+        String lat = metadata.get(TikaCoreProperties.LATITUDE)
+        String longt = metadata.get(TikaCoreProperties.LONGITUDE)
+
+        if(date != null) image.date = date
+        if(lat != null) image.latitude = lat as double
+        if(longt != null) image.longitude = longt as double
+        if(lat != null && longt != null) image.gpsDescription = "Latitude: ${lat} Longitude: ${longt}"
+        
+        if(image.date == null) {
+          image.destFile = Paths.get(destD,"UNDATED",image.srcFile.getFileName().toString())
+          image.dateHash = "UNDATED" + image.srcFile.getFileName().toString()
+        }
+        else {
+          image.destFile = Paths.get(destD,
+                            image.date.format("yyyy"),image.date.format("MMM"),image.date.format("d"),image.date.format("HH_mm_ss")
+                            +"."+FilenameUtils.getExtension(imageFile))
+          image.dateHash = image.date.format("yyyy") + "_"+ image.date.format("MMM") + 
+                            "_"+ image.date.format("d") + image.date.format("HH_mm_ss")
+        }
+        image.foundEXIF = true
+
+      } catch(all) {
+        image.foundEXIF = false
+        image.error = all.getMessage()
+        image.errorStack = ExceptionUtils.getStackTrace(all)
+      }
+      if(image.foundEXIF) images.add(image)
+      else others.add(image)
   }
 
   def processFile(imageFile) {
