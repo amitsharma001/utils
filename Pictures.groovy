@@ -79,7 +79,7 @@ class ImageOrganizer {
   int totalfiles = 0
 
   public ImageOrganizer() {
-    String userhome = System.getProperty("user.home")
+    String userhome = "E:\\" //System.getProperty("user.home")
     destImgDir = Paths.get(userhome,"ImageOrganizer","images").toString()
     destDbDir = Paths.get(userhome,"ImageOrganizer","db","db").toString()
     sql = Sql.newInstance('jdbc:hsqldb:file:'+destDbDir, 'SA', '', 'org.hsqldb.jdbc.JDBCDriver')
@@ -272,7 +272,7 @@ class ImageOrganizer {
           if(milli == 0) date = new Date(date.getTime() + rand.nextInt(1000))
           image.date = date
         } else { //base it on modified time
-          if ((file.lastModified() - today) > 94608000000L ) { // 3 years approx. 1000*3600*24*365*3
+          if ((today - file.lastModified()) > 94608000000L ) { // 3 years approx. 1000*3600*24*365*3
             image.date = new Date(file.lastModified())
             image.flags = 'M'
           }
