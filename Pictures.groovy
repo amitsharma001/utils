@@ -105,15 +105,14 @@ class ImageOrganizer {
         image.srcFile = Paths.get(row.src)
         
         if(row.createdate != null) image.date = (row.createdate as Date)
-        else 
         image.ftype = row.filetype
         image.flags = row.flags
         image.latitude = row.latitude as double
         image.longitude = row.longitude as double
         image.hash = row.md5
         
-        if(image.date == null) {
-          image.destFile = Paths.get(destImgDir,"UNDATED",image.srcFile.getFileName().toString())
+        if(image.flags != null && image.flags.indexOf("M") != -1) {
+          image.destFile = Paths.get(destImgDir,"UNDATED",image.date.format("yyyy"),image.date.format("MM"),image.date.format("d"),image.srcFile.getFileName().toString())
         }
         else {
           image.destFile = Paths.get(destImgDir,
@@ -130,11 +129,11 @@ class ImageOrganizer {
     return false
   }
 
-  def executeCommand(command) {
+  def executeCommand(command, show= true) {
     if(sql != null) {
       try {
         sql.query(command) { resultSet ->  
-          DBHelper.showResults(resultSet, DBHelper.pickColumns(sql, resultSet.getMetaData(), true), 100)
+          DBHelper.showResults(resultSet, DBHelper.pickColumns(sql, resultSet.getMetaData(), show), 100)
         }
       } catch(e) {
         System.out.println(e.getMessage())
@@ -144,7 +143,10 @@ class ImageOrganizer {
 
   def insertImage(table, image) {
     def timestamp = image.date == null? null : "'"+image.date.format("yyyy-MM-dd HH:mm:ss.SSS")+"'"
-    if (table == "Pictures" || table == "PicturesTemp" ) sql.execute("insert into " + table + " (src, filetype, createdate, flags, latitude, longitude, md5) values ('${image.file}', '${image.ftype}', ${timestamp}, '${image.flags}', ${image.latitude}, ${image.longitude}, '${image.hash}')") 
+    def src = image.file.startsWith(destImgDir)?image.file.drop(destImgDir.size()+1): image.file
+    def flags = image.flags == null? null : "'"+image.flags+"'"
+    def ftype = image.ftype == null? null : "'"+image.ftype+"'"
+    if (table == "Pictures" || table == "PicturesTemp" ) sql.execute("insert into " + table + " (src, filetype, createdate, flags, latitude, longitude, md5) values ('${src}', ${ftype}, ${timestamp}, ${flags}, ${image.latitude}, ${image.longitude}, '${image.hash}')") 
   }
 
   // Public Methods
@@ -192,13 +194,13 @@ class ImageOrganizer {
   def checkRepo() {
     def checkFiles = true
      
-    print("Checking for interrupted imports ...")
-    def count = executeCommand("SELECT Id, ImportDate from HISTORY WHERE Status = 'P'", true)
+    println("Checking for interrupted imports ...")
+    def count = executeCommand("SELECT Id, ImportDate, Status from HISTORY WHERE Status = 'P'", true)
     if(count == 0) {
       checkFiles = getBoolImput("Nothing untoward found in History do you want to check cache")
     }
     if(checkFiles) {
-      print("Checking for files that are not in the database ...")
+      println("Checking for files that are not in the database ...")
       Path p = Paths.get(destImgDir)
       def filelist = []
       p.eachFileRecurse(FileType.FILES) {
@@ -215,10 +217,11 @@ class ImageOrganizer {
         found = filelist.collect { processFileTika(it, true) }
       }
       def updates = found.inject(0) { acc, val -> 
-        if(val) acc + 1
+        if(val) acc += 1
+        return acc
       }
       print("Discoverd $updates new images not in the database.")
-      if(updates > 0) sql.execute("UPDATE HISTORY SET Status = 'R' WHERE Status = 'P'") 
+      sql.execute("UPDATE HISTORY SET Status = 'R' WHERE Status = 'P'") 
     }
   }
 
@@ -272,10 +275,8 @@ class ImageOrganizer {
           if(milli == 0) date = new Date(date.getTime() + rand.nextInt(1000))
           image.date = date
         } else { //base it on modified time
-          if ((file.lastModified() - today) > 94608000000L ) { // 3 years approx. 1000*3600*24*365*3
-            image.date = new Date(file.lastModified())
-            image.flags = 'M'
-          }
+          image.date = new Date(file.lastModified())
+          image.flags = 'M'
         }
         if(ftype != null) image.ftype = ftype
         if(lat != null) image.latitude = lat as double
@@ -298,7 +299,7 @@ class ImageOrganizer {
         insert = true
         def table =  "PicturesTemp"
         if(checkCache) {
-          def rows = sql.rows("SELECT Id from Pictures WHERE ID = '${image.hash}'")
+          def rows = sql.rows("SELECT Id from Pictures WHERE md5 = ${image.hash}")
           if( rows.size() > 0 ) insert = false
           table = "Pictures"
         }
@@ -394,7 +395,9 @@ while(keepProcessing) {
   } else if(cmd[0] =="import") {
     io.removeDuplicates()
     io.removeExisting()
-    io.importToRepo()
+    Thread.startDaemon() {
+      io.importToRepo()
+    }
   } else if(cmd[0] =="check") {
     io.checkRepo()
   } else {
