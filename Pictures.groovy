@@ -67,6 +67,8 @@ class ImageFile {
 @Log
 class ImageOrganizer {
   Vector others = []
+  Vector intDuplicates = []
+  Vector extDuplicates = []
   def imageCount = new AtomicInteger()
   def sql = null
 
@@ -151,24 +153,59 @@ class ImageOrganizer {
     def ftype = image.ftype == null? null : "'"+image.ftype+"'"
     if (table == "Pictures" || table == "PicturesTemp" ) sql.execute("insert into " + table + " (src, filetype, createdate, flags, latitude, longitude, md5) values ('${src}', ${ftype}, ${timestamp}, ${flags}, ${image.latitude}, ${image.longitude}, '${image.hash}')") 
   }
+  
+  def removeImagesWithId(images) {
+    if(images.size() > 0) {
+      logFile.write("Removing ${images.size()} images. ID: $images")
+      def delCount = sql.withBatch(20, "Delete from PicturesTemp WHERE ID = ?") { ps ->
+        images.each { ps.addBatch($it) }
+      }
+      logFile.write("Successfully removed ${delCount} images.")
+    }
+  }
 
   // Public Methods
   
   def findDuplicates() {
-    sql.eachRow("Select * from PicturesTemp WHERE ID IN (SELECT ID from PicturesTemp
-    executeCommand("select MIN(Id) AS RowToKeep, md5 from PicturesTemp GROUP BY md5 HAVING COUNT(*) > 1")
+    intDuplicates = new Vector()
+    def lastHash = ""
+    def lines = []
+    int count = 0
+    logFile.write("Looking for duplicate images in the source directory.\n")
+    sql.eachRow("Select id, src, md5 from PicturesTemp WHERE md5 IN (SELECT md5 from PicturesTemp GROUP BY md5 HAVING COUNT(*) > 1) order by md5") { row ->
+      if(lastHash != row.md5) {
+        lines.add("Source: $row.src Hash: $row.md5")
+        lastHash = row.md5
+      }
+      else {
+        count++
+        lines.add("---> Duplicate: $row.src Hash: $row.md5 Id: $row.id")
+        intDuplicates.add(row.id as int)
+      }
+    }
+    logFile.write("Found $count duplicate images in the source directory.\n");
+    logFile.write(lines.join("\r\n"))
   }
   
   def removeDuplicates() {
-    sql.execute("DELETE FROM PicturesTemp Where ID in (select MIN(Id) from PicturesTemp GROUP BY md5 HAVING COUNT(*) > 1)")
+    removeImagesWithId(intDuplicates)
   }
+
   
   def findInRepo() {
-    executeCommand("SELECT P.SRC, T.SRC, P.CreateDate, T.CreateDate FROM Pictures AS P INNER JOIN PicturesTemp AS T ON P.md5 = T.md5")
+    extDuplicates = new Vector()
+    def lines = []
+    logFile.write("Looking for images that already exist in repository.\n")
+    sql.eachRow("SELECT T.ID as ID, T.SRC as SRC, P.SRC as RepoSrc FROM Pictures AS P INNER JOIN PicturesTemp AS T ON P.md5 = T.md5") { row ->
+      extDuplicates.add(row.id as int)
+      lines.add("Image: ${row.src} Repository: ${row.RepoSrc}")
+    }
+    logFile.write("Found ${lines.size()} images that already exist in the repository.\n");
+    logFile.write(lines.join("\r\n"))
   }
   
   def removeExisting() {
-    sql.execute("DELETE FROM PicturesTemp WHERE ID IN (SELECT T.ID as ID from Pictures AS P INNER JOIN PicturesTemp AS T ON P.md5 = T.md5)")
+    removeImagesWithId(extDuplicates)
   }
 
   def importToRepo() {
