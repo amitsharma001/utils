@@ -72,6 +72,7 @@ class ImageOrganizer {
 
   String srcD = null
   String destImgDir = null
+  File logFile = null
   String destDbDir = null
   Random rand = new Random()
   long today = (new Date()).getTime()
@@ -80,7 +81,9 @@ class ImageOrganizer {
 
   public ImageOrganizer() {
     String userhome = System.getProperty("user.home")
+    Date now = new Date()
     destImgDir = Paths.get(userhome,"ImageOrganizer","images").toString()
+    logFile = new File(Paths.get(userhome,"ImageOrganizer","logs",date.format("yyyy-MM-d_HH_mm_ss")+".log").toString())
     destDbDir = Paths.get(userhome,"ImageOrganizer","db","db").toString()
     sql = Sql.newInstance('jdbc:hsqldb:file:'+destDbDir, 'SA', '', 'org.hsqldb.jdbc.JDBCDriver')
     initDataBase()
@@ -152,6 +155,7 @@ class ImageOrganizer {
   // Public Methods
   
   def findDuplicates() {
+    sql.eachRow("Select * from PicturesTemp WHERE ID IN (SELECT ID from PicturesTemp
     executeCommand("select MIN(Id) AS RowToKeep, md5 from PicturesTemp GROUP BY md5 HAVING COUNT(*) > 1")
   }
   
@@ -197,7 +201,7 @@ class ImageOrganizer {
     println("Checking for interrupted imports ...")
     def count = executeCommand("SELECT Id, ImportDate, Status from HISTORY WHERE Status = 'P'", true)
     if(count == 0) {
-      checkFiles = getBoolImput("Nothing untoward found in History do you want to check cache")
+      checkFiles = getBoolImput("Nothing untoward found in History do you want to check cache?")
     }
     if(checkFiles) {
       println("Checking for files that are not in the database ...")
@@ -226,6 +230,7 @@ class ImageOrganizer {
   }
 
   def processFiles() {
+    logFile.write("Importing files from ${srcD} into temporary database for analysis.\n")
     Path p = Paths.get(srcD)
     def filelist = []
     p.eachFileRecurse(FileType.FILES) {
@@ -244,6 +249,7 @@ class ImageOrganizer {
     withPool() {
       filelist.each { processFileTika(it, false) }
     }
+    logFile.write("Found ${imageCount.get()} images and ${others.size()} other unrecognized files from $totalfiles in the source directory.\n")
   }
 
   def processFileTika(imageFile, checkCache) {
