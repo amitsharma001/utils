@@ -60,7 +60,7 @@ class ImageFile {
     lines << "Destination: ${destFile.toString()}" 
     if(error != null) lines << "Error: $error" 
     if(errorStack != null) lines << "StackTrace: $errorStack" 
-    return lines.join("\r\n")
+    return lines.join("\n")
   }
 }
 
@@ -85,7 +85,9 @@ class ImageOrganizer {
     String userhome = System.getProperty("user.home")
     Date now = new Date()
     destImgDir = Paths.get(userhome,"ImageOrganizer","images").toString()
-    logFile = new File(Paths.get(userhome,"ImageOrganizer","logs",date.format("yyyy-MM-d_HH_mm_ss")+".log").toString())
+    Path logFilePath = Paths.get(userhome,"ImageOrganizer","logs",now.format("yyyy-MM-d")+".log")
+    logFile = new File(logFilePath.toString())
+    Files.createDirectories(logFilePath.getParent())
     destDbDir = Paths.get(userhome,"ImageOrganizer","db","db").toString()
     sql = Sql.newInstance('jdbc:hsqldb:file:'+destDbDir, 'SA', '', 'org.hsqldb.jdbc.JDBCDriver')
     initDataBase()
@@ -156,11 +158,13 @@ class ImageOrganizer {
   
   def removeImagesWithId(images) {
     if(images.size() > 0) {
-      logFile.write("Removing ${images.size()} images. ID: $images")
+      logFile.append("Removing ${images.size()} images.\nID: $images\n")
       def delCount = sql.withBatch(20, "Delete from PicturesTemp WHERE ID = ?") { ps ->
-        images.each { ps.addBatch($it) }
+        images.each { ps.addBatch(it) }
       }
-      logFile.write("Successfully removed ${delCount} images.")
+      sql.commit()
+      def deleted = delCount.inject(0) { acc, val -> acc += val } 
+      logFile.append("Successfully removed ${deleted} images.\n")
     }
   }
 
@@ -171,10 +175,10 @@ class ImageOrganizer {
     def lastHash = ""
     def lines = []
     int count = 0
-    logFile.write("Looking for duplicate images in the source directory.\n")
+    logFile.append("Looking for duplicate images in the directory: $srcD.\n")
     sql.eachRow("Select id, src, md5 from PicturesTemp WHERE md5 IN (SELECT md5 from PicturesTemp GROUP BY md5 HAVING COUNT(*) > 1) order by md5") { row ->
       if(lastHash != row.md5) {
-        lines.add("Source: $row.src Hash: $row.md5")
+        lines.add("Source: $row.src Hash: $row.md5 Id: $row.id")
         lastHash = row.md5
       }
       else {
@@ -183,8 +187,8 @@ class ImageOrganizer {
         intDuplicates.add(row.id as int)
       }
     }
-    logFile.write("Found $count duplicate images in the source directory.\n");
-    logFile.write(lines.join("\r\n"))
+    logFile.append("Found $count duplicate images in the directory: $srcD.\n");
+    logFile.append(lines.join("\n")+"\n")
   }
   
   def removeDuplicates() {
@@ -195,13 +199,13 @@ class ImageOrganizer {
   def findInRepo() {
     extDuplicates = new Vector()
     def lines = []
-    logFile.write("Looking for images that already exist in repository.\n")
+    logFile.append("Looking for images that already exist in repository.\n")
     sql.eachRow("SELECT T.ID as ID, T.SRC as SRC, P.SRC as RepoSrc FROM Pictures AS P INNER JOIN PicturesTemp AS T ON P.md5 = T.md5") { row ->
       extDuplicates.add(row.id as int)
       lines.add("Image: ${row.src} Repository: ${row.RepoSrc}")
     }
-    logFile.write("Found ${lines.size()} images that already exist in the repository.\n");
-    logFile.write(lines.join("\r\n"))
+    logFile.append("Found ${lines.size()} images that already exist in the repository.\n");
+    logFile.append(lines.join("\n")+"\n")
   }
   
   def removeExisting() {
@@ -212,23 +216,31 @@ class ImageOrganizer {
     Vector images = [] // has to be Vector so it's thread safe in the loop below
     loadTempToMemory(images)
     if(images.size() > 0 ) {
-      def notes = System.console().readLine "Enter the notes for this import of ${images.size()} images.\nNotes: "
+      def notes = "Importing ${images.size()} images from $srcD"
+      logFile.append(notes+"\n")
+      notes = "'"+notes+"'"
       def id = sql.executeInsert("INSERT INTO HISTORY (ImgCount, Notes, ImportDate, Status) VALUES (${images.size()}, $notes, NOW, 'P')")
-      println("Starting import of ${images.size()} images.")
+      def imageImpFile = new AtomicInteger()
+      def imageImpDb = new AtomicInteger()
       withPool() {
         images.each {
           Files.createDirectories(it.destFile.getParent())
           Files.copy(it.srcFile, it.destFile, StandardCopyOption.REPLACE_EXISTING)
+          imageImpFile.getAndIncrement()
         }
         images.each {
           it.file = it.destFile.toString()
           insertImage("Pictures", it)
+          imageImpDb.getAndIncrement()
         }
       }
-      sql.execute("DELETE FROM PicturesTemp")
-      sql.execute("UPDATE HISTORY SET Status = 'D' WHERE ID = ${id[0][0]}")
+      if( imageImpFile.get() == imageImpDb.get() && imageImpFile.get() == images.size() ) { 
+        sql.execute("DELETE FROM PicturesTemp")
+        sql.execute("UPDATE HISTORY SET Status = 'D' WHERE ID = ${id[0][0]}")
+        logFile.append("Successfully imported ${images.size()} files and also updated the image database.\n")
+      }
     } else {
-      println("There were no images to import.")
+      logFile.append("There were no images to import.\n")
     }
   }
 
@@ -267,7 +279,7 @@ class ImageOrganizer {
   }
 
   def processFiles() {
-    logFile.write("Importing files from ${srcD} into temporary database for analysis.\n")
+    logFile.append("Importing files from ${srcD} into temporary database for analysis.\n")
     Path p = Paths.get(srcD)
     def filelist = []
     p.eachFileRecurse(FileType.FILES) {
@@ -286,7 +298,7 @@ class ImageOrganizer {
     withPool() {
       filelist.each { processFileTika(it, false) }
     }
-    logFile.write("Found ${imageCount.get()} images and ${others.size()} other unrecognized files from $totalfiles in the source directory.\n")
+    logFile.append("Found ${imageCount.get()} images and ${others.size()} other unrecognized files from $totalfiles files in directory $srcD.\n")
   }
 
   def processFileTika(imageFile, checkCache) {
@@ -436,7 +448,9 @@ while(keepProcessing) {
   } else if(cmd[0] =="select") {
     io.executeCommand(command)
   } else if(cmd[0] =="import") {
+    io.findDuplicates()
     io.removeDuplicates()
+    io.findInRepo()
     io.removeExisting()
     Thread.startDaemon() {
       io.importToRepo()
