@@ -188,7 +188,7 @@ class ImageOrganizer {
       }
     }
     logFile.append("Found $count duplicate images in the directory: $srcD.\n");
-    logFile.append(lines.join("\n")+"\n")
+    if(lines.size() > 0) logFile.append(lines.join("\n")+"\n")
   }
   
   def removeDuplicates() {
@@ -205,7 +205,7 @@ class ImageOrganizer {
       lines.add("Image: ${row.src} Repository: ${row.RepoSrc}")
     }
     logFile.append("Found ${lines.size()} images that already exist in the repository.\n");
-    logFile.append(lines.join("\n")+"\n")
+    if(lines.size() > 0) logFile.append(lines.join("\n")+"\n")
   }
   
   def removeExisting() {
@@ -313,13 +313,18 @@ class ImageOrganizer {
       Parser parser = new AutoDetectParser()
       BodyContentHandler handler = new BodyContentHandler()
       Metadata metadata = new Metadata()
-      FileInputStream inputstream = new FileInputStream(file)
-      FileInputStream inputHashStream = new FileInputStream(file)
       ParseContext context = new ParseContext()
       
       try {
-        parser.parse(inputstream, handler, metadata, context)
-        String md5 = org.apache.commons.codec.digest.DigestUtils.md5Hex(inputHashStream)
+        String md5 = null
+        FileInputStream inputstream = new FileInputStream(file)
+        inputstream.withStream() {
+          parser.parse(it, handler, metadata, context)
+        }
+        inputstream = new FileInputStream(file)
+        inputstream.withStream() {
+          md5 = org.apache.commons.codec.digest.DigestUtils.md5Hex(it)
+        }
         Date date = metadata.getDate(TikaCoreProperties.CREATED)
         String ftype = metadata.get(Metadata.CONTENT_TYPE)
         String lat = metadata.get(TikaCoreProperties.LATITUDE)
@@ -345,9 +350,6 @@ class ImageOrganizer {
         image.foundEXIF = false
         image.error = all.getMessage()
         image.errorStack = ExceptionUtils.getStackTrace(all)
-      }
-      finally {
-        if(inputHashStream != null) inputHashStream.close()
       }
       if(image.foundEXIF) {
         imageCount.getAndIncrement()
