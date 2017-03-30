@@ -60,18 +60,21 @@ class ImageFile {
     lines << "Destination: ${destFile.toString()}" 
     if(error != null) lines << "Error: $error" 
     if(errorStack != null) lines << "StackTrace: $errorStack" 
-    return lines.join("\r\n")
+    return lines.join("\n")
   }
 }
 
 @Log
 class ImageOrganizer {
   Vector others = []
+  Vector intDuplicates = []
+  Vector extDuplicates = []
   def imageCount = new AtomicInteger()
   def sql = null
 
   String srcD = null
   String destImgDir = null
+  File logFile = null
   String destDbDir = null
   Random rand = new Random()
   long today = (new Date()).getTime()
@@ -80,7 +83,11 @@ class ImageOrganizer {
 
   public ImageOrganizer() {
     String userhome = "E:\\" //System.getProperty("user.home")
+    Date now = new Date()
     destImgDir = Paths.get(userhome,"ImageOrganizer","images").toString()
+    Path logFilePath = Paths.get(userhome,"ImageOrganizer","logs",now.format("yyyy-MM-d")+".log")
+    logFile = new File(logFilePath.toString())
+    Files.createDirectories(logFilePath.getParent())
     destDbDir = Paths.get(userhome,"ImageOrganizer","db","db").toString()
     sql = Sql.newInstance('jdbc:hsqldb:file:'+destDbDir, 'SA', '', 'org.hsqldb.jdbc.JDBCDriver')
     initDataBase()
@@ -105,15 +112,14 @@ class ImageOrganizer {
         image.srcFile = Paths.get(row.src)
         
         if(row.createdate != null) image.date = (row.createdate as Date)
-        else 
         image.ftype = row.filetype
         image.flags = row.flags
         image.latitude = row.latitude as double
         image.longitude = row.longitude as double
         image.hash = row.md5
         
-        if(image.date == null) {
-          image.destFile = Paths.get(destImgDir,"UNDATED",image.srcFile.getFileName().toString())
+        if(image.flags != null && image.flags.indexOf("M") != -1) {
+          image.destFile = Paths.get(destImgDir,"UNDATED",image.date.format("yyyy"),image.date.format("MM"),image.date.format("d"),image.srcFile.getFileName().toString())
         }
         else {
           image.destFile = Paths.get(destImgDir,
@@ -130,11 +136,11 @@ class ImageOrganizer {
     return false
   }
 
-  def executeCommand(command) {
+  def executeCommand(command, show= true) {
     if(sql != null) {
       try {
         sql.query(command) { resultSet ->  
-          DBHelper.showResults(resultSet, DBHelper.pickColumns(sql, resultSet.getMetaData(), true), 100)
+          DBHelper.showResults(resultSet, DBHelper.pickColumns(sql, resultSet.getMetaData(), show), 100)
         }
       } catch(e) {
         System.out.println(e.getMessage())
@@ -144,61 +150,110 @@ class ImageOrganizer {
 
   def insertImage(table, image) {
     def timestamp = image.date == null? null : "'"+image.date.format("yyyy-MM-dd HH:mm:ss.SSS")+"'"
-    if (table == "Pictures" || table == "PicturesTemp" ) sql.execute("insert into " + table + " (src, filetype, createdate, flags, latitude, longitude, md5) values ('${image.file}', '${image.ftype}', ${timestamp}, '${image.flags}', ${image.latitude}, ${image.longitude}, '${image.hash}')") 
+    def src = image.file.startsWith(destImgDir)?image.file.drop(destImgDir.size()+1): image.file
+    def flags = image.flags == null? null : "'"+image.flags+"'"
+    def ftype = image.ftype == null? null : "'"+image.ftype+"'"
+    if (table == "Pictures" || table == "PicturesTemp" ) sql.execute("insert into " + table + " (src, filetype, createdate, flags, latitude, longitude, md5) values ('${src}', ${ftype}, ${timestamp}, ${flags}, ${image.latitude}, ${image.longitude}, '${image.hash}')") 
+  }
+  
+  def removeImagesWithId(images) {
+    if(images.size() > 0) {
+      logFile.append("Removing ${images.size()} images.\nID: $images\n")
+      def delCount = sql.withBatch(20, "Delete from PicturesTemp WHERE ID = ?") { ps ->
+        images.each { ps.addBatch(it) }
+      }
+      sql.commit()
+      def deleted = delCount.inject(0) { acc, val -> acc += val } 
+      logFile.append("Successfully removed ${deleted} images.\n")
+    }
   }
 
   // Public Methods
   
   def findDuplicates() {
-    executeCommand("select MIN(Id) AS RowToKeep, md5 from PicturesTemp GROUP BY md5 HAVING COUNT(*) > 1")
+    intDuplicates = new Vector()
+    def lastHash = ""
+    def lines = []
+    int count = 0
+    logFile.append("Looking for duplicate images in the directory: $srcD.\n")
+    sql.eachRow("Select id, src, md5 from PicturesTemp WHERE md5 IN (SELECT md5 from PicturesTemp GROUP BY md5 HAVING COUNT(*) > 1) order by md5") { row ->
+      if(lastHash != row.md5) {
+        lines.add("Source: $row.src Hash: $row.md5 Id: $row.id")
+        lastHash = row.md5
+      }
+      else {
+        count++
+        lines.add("---> Duplicate: $row.src Hash: $row.md5 Id: $row.id")
+        intDuplicates.add(row.id as int)
+      }
+    }
+    logFile.append("Found $count duplicate images in the directory: $srcD.\n");
+    logFile.append(lines.join("\n")+"\n")
   }
   
   def removeDuplicates() {
-    sql.execute("DELETE FROM PicturesTemp Where ID in (select MIN(Id) from PicturesTemp GROUP BY md5 HAVING COUNT(*) > 1)")
+    removeImagesWithId(intDuplicates)
   }
+
   
   def findInRepo() {
-    executeCommand("SELECT P.SRC, T.SRC, P.CreateDate, T.CreateDate FROM Pictures AS P INNER JOIN PicturesTemp AS T ON P.md5 = T.md5")
+    extDuplicates = new Vector()
+    def lines = []
+    logFile.append("Looking for images that already exist in repository.\n")
+    sql.eachRow("SELECT T.ID as ID, T.SRC as SRC, P.SRC as RepoSrc FROM Pictures AS P INNER JOIN PicturesTemp AS T ON P.md5 = T.md5") { row ->
+      extDuplicates.add(row.id as int)
+      lines.add("Image: ${row.src} Repository: ${row.RepoSrc}")
+    }
+    logFile.append("Found ${lines.size()} images that already exist in the repository.\n");
+    logFile.append(lines.join("\n")+"\n")
   }
   
   def removeExisting() {
-    sql.execute("DELETE FROM PicturesTemp WHERE ID IN (SELECT T.ID as ID from Pictures AS P INNER JOIN PicturesTemp AS T ON P.md5 = T.md5)")
+    removeImagesWithId(extDuplicates)
   }
 
   def importToRepo() {
     Vector images = [] // has to be Vector so it's thread safe in the loop below
     loadTempToMemory(images)
     if(images.size() > 0 ) {
-      def notes = System.console().readLine "Enter the notes for this import of ${images.size()} images.\nNotes: "
+      def notes = "Importing ${images.size()} images from $srcD"
+      logFile.append(notes+"\n")
+      notes = "'"+notes+"'"
       def id = sql.executeInsert("INSERT INTO HISTORY (ImgCount, Notes, ImportDate, Status) VALUES (${images.size()}, $notes, NOW, 'P')")
-      println("Starting import of ${images.size()} images.")
+      def imageImpFile = new AtomicInteger()
+      def imageImpDb = new AtomicInteger()
       withPool() {
         images.each {
           Files.createDirectories(it.destFile.getParent())
           Files.copy(it.srcFile, it.destFile, StandardCopyOption.REPLACE_EXISTING)
+          imageImpFile.getAndIncrement()
         }
         images.each {
           it.file = it.destFile.toString()
           insertImage("Pictures", it)
+          imageImpDb.getAndIncrement()
         }
       }
-      sql.execute("DELETE FROM PicturesTemp")
-      sql.execute("UPDATE HISTORY SET Status = 'D' WHERE ID = ${id[0][0]}")
+      if( imageImpFile.get() == imageImpDb.get() && imageImpFile.get() == images.size() ) { 
+        sql.execute("DELETE FROM PicturesTemp")
+        sql.execute("UPDATE HISTORY SET Status = 'D' WHERE ID = ${id[0][0]}")
+        logFile.append("Successfully imported ${images.size()} files and also updated the image database.\n")
+      }
     } else {
-      println("There were no images to import.")
+      logFile.append("There were no images to import.\n")
     }
   }
 
   def checkRepo() {
     def checkFiles = true
      
-    print("Checking for interrupted imports ...")
-    def count = executeCommand("SELECT Id, ImportDate from HISTORY WHERE Status = 'P'", true)
+    println("Checking for interrupted imports ...")
+    def count = executeCommand("SELECT Id, ImportDate, Status from HISTORY WHERE Status = 'P'", true)
     if(count == 0) {
-      checkFiles = getBoolImput("Nothing untoward found in History do you want to check cache")
+      checkFiles = getBoolImput("Nothing untoward found in History do you want to check cache?")
     }
     if(checkFiles) {
-      print("Checking for files that are not in the database ...")
+      println("Checking for files that are not in the database ...")
       Path p = Paths.get(destImgDir)
       def filelist = []
       p.eachFileRecurse(FileType.FILES) {
@@ -215,14 +270,16 @@ class ImageOrganizer {
         found = filelist.collect { processFileTika(it, true) }
       }
       def updates = found.inject(0) { acc, val -> 
-        if(val) acc + 1
+        if(val) acc += 1
+        return acc
       }
       print("Discoverd $updates new images not in the database.")
-      if(updates > 0) sql.execute("UPDATE HISTORY SET Status = 'R' WHERE Status = 'P'") 
+      sql.execute("UPDATE HISTORY SET Status = 'R' WHERE Status = 'P'") 
     }
   }
 
   def processFiles() {
+    logFile.append("Importing files from ${srcD} into temporary database for analysis.\n")
     Path p = Paths.get(srcD)
     def filelist = []
     p.eachFileRecurse(FileType.FILES) {
@@ -241,6 +298,7 @@ class ImageOrganizer {
     withPool() {
       filelist.each { processFileTika(it, false) }
     }
+    logFile.append("Found ${imageCount.get()} images and ${others.size()} other unrecognized files from $totalfiles files in directory $srcD.\n")
   }
 
   def processFileTika(imageFile, checkCache) {
@@ -272,10 +330,8 @@ class ImageOrganizer {
           if(milli == 0) date = new Date(date.getTime() + rand.nextInt(1000))
           image.date = date
         } else { //base it on modified time
-          if ((today - file.lastModified()) > 94608000000L ) { // 3 years approx. 1000*3600*24*365*3
-            image.date = new Date(file.lastModified())
-            image.flags = 'M'
-          }
+          image.date = new Date(file.lastModified())
+          image.flags = 'M'
         }
         if(ftype != null) image.ftype = ftype
         if(lat != null) image.latitude = lat as double
@@ -298,7 +354,7 @@ class ImageOrganizer {
         insert = true
         def table =  "PicturesTemp"
         if(checkCache) {
-          def rows = sql.rows("SELECT Id from Pictures WHERE ID = '${image.hash}'")
+          def rows = sql.rows("SELECT Id from Pictures WHERE md5 = ${image.hash}")
           if( rows.size() > 0 ) insert = false
           table = "Pictures"
         }
@@ -392,9 +448,13 @@ while(keepProcessing) {
   } else if(cmd[0] =="select") {
     io.executeCommand(command)
   } else if(cmd[0] =="import") {
+    io.findDuplicates()
     io.removeDuplicates()
+    io.findInRepo()
     io.removeExisting()
-    io.importToRepo()
+    Thread.startDaemon() {
+      io.importToRepo()
+    }
   } else if(cmd[0] =="check") {
     io.checkRepo()
   } else {
