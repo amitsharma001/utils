@@ -82,7 +82,7 @@ class ImageOrganizer {
   int totalfiles = 0
 
   public ImageOrganizer() {
-    String userhome = System.getProperty("user.home")
+    String userhome = "E:\\" //System.getProperty("user.home")
     Date now = new Date()
     destImgDir = Paths.get(userhome,"ImageOrganizer","images").toString()
     Path logFilePath = Paths.get(userhome,"ImageOrganizer","logs",now.format("yyyy-MM-d")+".log")
