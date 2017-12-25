@@ -159,12 +159,15 @@ class ImageOrganizer {
   def removeImagesWithId(images) {
     if(images.size() > 0) {
       logFile.append("Removing ${images.size()} images.\nID: $images\n")
-      def delCount = sql.withBatch(20, "Delete from PicturesTemp WHERE ID = ?") { ps ->
-        images.each { ps.addBatch(it) }
+      int[] delCount = null
+      sql.withTransaction {
+        delCount = sql.withBatch("Delete from PicturesTemp WHERE ID = ?") { ps ->
+          images.each { ps.addBatch(it) }
+        }
       }
-      sql.commit()
       def deleted = delCount.inject(0) { acc, val -> acc += val } 
       logFile.append("Successfully removed ${deleted} images.\n")
+      print("Successfully removed ${deleted} images.\n")
     }
   }
 
@@ -188,6 +191,7 @@ class ImageOrganizer {
       }
     }
     logFile.append("Found $count duplicate images in the directory: $srcD.\n");
+    print("Found $count duplicate images in the directory: $srcD.\n");
     logFile.append(lines.join("\n")+"\n")
   }
   
@@ -205,6 +209,7 @@ class ImageOrganizer {
       lines.add("Image: ${row.src} Repository: ${row.RepoSrc}")
     }
     logFile.append("Found ${lines.size()} images that already exist in the repository.\n");
+    print("Found ${lines.size()} images that already exist in the repository.\n");
     logFile.append(lines.join("\n")+"\n")
   }
   
@@ -238,9 +243,11 @@ class ImageOrganizer {
         sql.execute("DELETE FROM PicturesTemp")
         sql.execute("UPDATE HISTORY SET Status = 'D' WHERE ID = ${id[0][0]}")
         logFile.append("Successfully imported ${images.size()} files and also updated the image database.\n")
+        print("Successfully imported ${images.size()} files and also updated the image database.\n")
       }
     } else {
       logFile.append("There were no images to import.\n")
+      print("There were no images to import.\n")
     }
   }
 
@@ -374,10 +381,11 @@ cli.with {
 }
 
 def options = cli.parse(args)
-  
+
+boolean keepProcessing = true  
 if(!options || options.h || args.length == 0) {
   cli.usage()
-  return
+  keepProcessing = false
 }
 
 def extraArgs = options.arguments()
@@ -397,7 +405,6 @@ Thread.startDaemon {
 }
 
 
-boolean keepProcessing = true
 def prompt = "io> "
 def command = null
 
@@ -435,16 +442,10 @@ while(keepProcessing) {
     }
   } else if (cmd[0] == "dedup") {
     io.findDuplicates()
-    if(io.getBoolInput("Do you want to remove duplicates shown")) {
-      io.removeDuplicates()
-      println "Duplicate images have been removed from the temp database."
-    }
+    io.removeDuplicates()
     println "Finding images that already exist in the master repository."
     io.findInRepo()
-    if(io.getBoolInput("Do you want to remove existing images")) {
-      io.removeExisting()
-      println "Existing images have been removed from the temp database."
-    }
+    io.removeExisting()
   } else if(cmd[0] =="select") {
     io.executeCommand(command)
   } else if(cmd[0] =="import") {
