@@ -1,6 +1,7 @@
 import groovy.sql.Sql
 import groovy.json.*
 import groovy.time.*
+import java.util.concurrent.atomic.AtomicInteger
 
 static showResults(resultSet,cols, pagesize = 200) { 
   def totalLength = 0
@@ -98,7 +99,11 @@ static pickColumns(sql, metadata, showKeys = false) {
   for(int i=1; i<=metadata.getColumnCount(); i++) {
     if(i == 1 && showKeys) pk = getPK(sql,metadata.getTableName(i))
     def size = metadata.getPrecision(i)
-    allCols[metadata.getColumnName(i)] = size > 5? size: 5
+    def type = metadata.getColumnTypeName(i);
+    if(type == "TIMESTAMP") size = 22
+    else if (type == "DATE") size = 10
+    else if (type == "VARCHAR") size > 5? size: 5
+    allCols[metadata.getColumnName(i)] = size
   }
   // get anything called Id, AccountID etc.
   allCols.each {k, v -> if (pk.contains(k)) selectedCols[k] = v}
@@ -184,120 +189,136 @@ static main(String[] args) {
   }
 
   if(options.c) command = "use ${options.c}"
-
-  while(true) {
-    try {
-      if(command == null) command = System.console().readLine prompt
-      if(command == null) continue
-      if(command.endsWith(";")) command = command[0..-2]
-      def commandA = command.toLowerCase().tokenize(' ')
-      
-      if(sql != null && commandA[0] == "select" ) {
-        def params = [:]
-        command.findAll(/:(\w*)/) { match, name ->
-          def pvalue = System.console().readLine "${name}: "
-          params[name] = pvalue
-        }
-        def timeStart = new Date()
-        sql.query(command, params) { resultSet ->  
-          showResults(resultSet, pickColumns(sql, resultSet.getMetaData(), connJ.config.showkeys), connJ.config.pagesize)
-        } 
-        TimeDuration duration = TimeCategory.minus(new Date(), timeStart)
-        println "Total Time: $duration"
-      } else if(sql != null && (commandA[0] == "insert" || commandA[0] == "update" || commandA[0] == "delete" || commandA[0] == "cache" || commandA[0] == "replicate")) {
+  
+  AtomicInteger idleSeconds = new AtomicInteger();
+ 
+  Thread.startDaemon {
+    while(true) {
+      idleSeconds.set(0);
+      try {
+        if(command == null) command = System.console().readLine prompt
+        if(command == null) continue
+        if(command.endsWith(";")) command = command[0..-2]
+        def commandA = command.toLowerCase().tokenize(' ')
+        
+        if(sql != null && commandA[0] == "select" ) {
           def params = [:]
           command.findAll(/:(\w*)/) { match, name ->
             def pvalue = System.console().readLine "${name}: "
             params[name] = pvalue
           }
-          if(commandA[0] == "insert") {
-            def keys = sql.executeInsert(command, params)
-            println "Generated Keys: ${keys[0]}"
-          } else {
-            sql.execute(command, params)
-          }
-      } else if(sql != null && (commandA[0] == "start" && commandA[1] == "batch")) {
-          println "Enter batch command, type [end] to finish and commit the batch."
-          def results = sql.withBatch() { stmt ->
-            while(true) {
-              command = System.console().readLine "batchcmd >"
-              if(command == null || command == "") continue
-              if(command.toLowerCase().equals("end")) break;
-              stmt.addBatch(command)
+          def timeStart = new Date()
+          sql.query(command, params) { resultSet ->  
+            showResults(resultSet, pickColumns(sql, resultSet.getMetaData(), connJ.config.showkeys), connJ.config.pagesize)
+          } 
+          TimeDuration duration = TimeCategory.minus(new Date(), timeStart)
+          println "Total Time: $duration"
+        } else if(sql != null && (commandA[0] == "insert" || commandA[0] == "update" || commandA[0] == "delete" || commandA[0] == "cache" || commandA[0] == "replicate")) {
+            def params = [:]
+            command.findAll(/:(\w*)/) { match, name ->
+              def pvalue = System.console().readLine "${name}: "
+              params[name] = pvalue
             }
-          }
-          println "Generated Keys: ${results}"
-      } else if(sql != null && (commandA[0] == "show" && commandA[1] == "tables")) {
-          showTables(sql)
-      } else if(sql !=null && commandA[0].startsWith("desc")) {
-          showColumns(sql, commandA[1])
-      } else if(sql !=null && commandA[0].startsWith("keys")) {
-          showKeys(sql, commandA[1])
-      } else if(sql !=null && commandA[0].startsWith("fkeys")) {
-          showImportedKeys(sql, commandA[1])
-      } else if(commandA[0] == "show" && commandA[1] == "databases") {
-        showDataBases(connJ)
-      } else if(commandA[0] == "use") {
-        driver = connJ.connections.find {k -> k.name == commandA[1];}
-        def chosenjar = 1, jarindex = "1"
-        if(commandA.size() > 2 && commandA[2] != null) jarindex = commandA[2].find(/(\d+)/)
-        if(jarindex != null && jarindex.isInteger()) chosenjar = jarindex as int 
-        if(driver != null) {
-          if(chosenjar > 0 && chosenjar <= driver.jar.size()) {
-            File df = new File(driver.jar[chosenjar-1])
-            if (df.exists()) {
-              def connstr = getConnection(driver,connJ.config)
-              if(commandA.size() > 3 && commandA[3] != null) connstr += ";"+commandA[3]
-              showDataBase(driver, chosenjar, connstr)
-              this.getClass().classLoader.rootLoader.addURL((new File(driver.jar[chosenjar-1])).toURL())
-              sql = Sql.newInstance(connstr, '', '', driver.driver)
-              prompt = "${driver.name} [$chosenjar]>"
+            if(commandA[0] == "insert") {
+              def keys = sql.executeInsert(command, params)
+              println "Generated Keys: ${keys[0]}"
             } else {
-              println "The selected jar ${driver.jar[chosenjar-1]} does not exist."
+              sql.execute(command, params)
+            }
+        } else if(sql != null && (commandA[0] == "start" && commandA[1] == "batch")) {
+            println "Enter batch command, type [end] to finish and commit the batch."
+            def results = sql.withBatch() { stmt ->
+              while(true) {
+                idleSeconds.set(0)
+                command = System.console().readLine "batchcmd >"
+                if(command == null || command == "") continue
+                if(command.toLowerCase().equals("end")) break;
+                stmt.addBatch(command)
+              }
+            }
+            println "Generated Keys: ${results}"
+        } else if(sql != null && (commandA[0] == "show" && commandA[1] == "tables")) {
+            showTables(sql)
+        } else if(sql !=null && commandA[0].startsWith("desc")) {
+            showColumns(sql, commandA[1])
+        } else if(sql !=null && commandA[0].startsWith("keys")) {
+            showKeys(sql, commandA[1])
+        } else if(sql !=null && commandA[0].startsWith("fkeys")) {
+            showImportedKeys(sql, commandA[1])
+        } else if(commandA[0] == "show" && commandA[1] == "databases") {
+          showDataBases(connJ)
+        } else if(commandA[0] == "use") {
+          driver = connJ.connections.find {k -> k.name == commandA[1];}
+          def chosenjar = 1, jarindex = "1"
+          if(commandA.size() > 2 && commandA[2] != null) jarindex = commandA[2].find(/(\d+)/)
+          if(jarindex != null && jarindex.isInteger()) chosenjar = jarindex as int 
+          if(driver != null) {
+            if(chosenjar > 0 && chosenjar <= driver.jar.size()) {
+              File df = new File(driver.jar[chosenjar-1])
+              if (df.exists()) {
+                def connstr = getConnection(driver,connJ.config)
+                if(commandA.size() > 3 && commandA[3] != null) connstr += ";"+commandA[3]
+                showDataBase(driver, chosenjar, connstr)
+                this.getClass().classLoader.rootLoader.addURL((new File(driver.jar[chosenjar-1])).toURL())
+                sql = Sql.newInstance(connstr, '', '', driver.driver)
+                prompt = "${driver.name} [$chosenjar]>"
+              } else {
+                println "The selected jar ${driver.jar[chosenjar-1]} does not exist."
+              }
+            } else {
+              println "There are only ${driver.jar.size()} jars available for the database [${driver.name}]."
             }
           } else {
-            println "There are only ${driver.jar.size()} jars available for the database [${driver.name}]."
+            println "Database ${commandA[1]} not found."
           }
+        } else if(commandA[0] == "config") {
+          if( commandA.size() != 3 ) println "Config must be specified as: config [name] [value]"
+          connJ.config[commandA[1]] = commandA[2]
+        } else if(commandA[0] == "q" || commandA[0] == "exit" || commandA[0] == "quit" ) {
+          System.exit(0)
+        } else if(command == "") {
+          // do nothing
+        } else if(command == "help") {
+          println "The following commands are supported:"
+          println ""
+          println "show databases;         Lists the drivers available in connections.json."
+          println "use [db] [#driver] [connection];"
+          println "                        Connects to the chosen database. The optional driver input specifies which driver to pick."
+          println "                        Additional connection properties can be specified. Helpful for Offline mode."   
+          println "keys [table];           Lists the primary keys in the table."
+          println "fkeys [table];          Lists the foreign keys in the table."
+          println "describe [table];       Lists the columns in the table."
+          println "start batch;            Start a batch command to insert/update/delete."
+          println "help;                   This help."
+          println "config {name} {value}   Change a config setting read from the connections.json."
+          println "exit;                   Exits this program."
+          println "SELECT/INSERT/UPDATE/DELETE statements"
+          println ""
+          println "Notes:"
+          println "1) For parameterized statements, use :name as the parameter placeholder."
+          println "   For example: INSERT into Account (Name,City) values (:name,:city)"
+          println "2) Parameters are not allowed in batch commands."
         } else {
-          println "Database ${commandA[1]} not found."
+          println "Unsupported command: [${command}]. You must select a database before running database commands."
         }
-      } else if(commandA[0] == "config") {
-        if( commandA.size() != 3 ) println "Config must be specified as: config [name] [value]"
-        connJ.config[commandA[1]] = commandA[2]
-      } else if(commandA[0] == "q" || commandA[0] == "exit" || commandA[0] == "quit" ) {
-        System.exit(0)
-      } else if(command == "") {
-        // do nothing
-      } else if(command == "help") {
-        println "The following commands are supported:"
+      } catch(Exception ex) {
+        println "Error: ${ex.getMessage()}"
+        ex.printStackTrace()
         println ""
-        println "show databases;         Lists the drivers available in connections.json."
-        println "use [db] [#driver] [connection];"
-        println "                        Connects to the chosen database. The optional driver input specifies which driver to pick."
-        println "                        Additional connection properties can be specified. Helpful for Offline mode."   
-        println "keys [table];           Lists the primary keys in the table."
-        println "fkeys [table];          Lists the foreign keys in the table."
-        println "describe [table];       Lists the columns in the table."
-        println "start batch;            Start a batch command to insert/update/delete."
-        println "help;                   This help."
-        println "config {name} {value}   Change a config setting read from the connections.json."
-        println "exit;                   Exits this program."
-        println "SELECT/INSERT/UPDATE/DELETE statements"
-        println ""
-        println "Notes:"
-        println "1) For parameterized statements, use :name as the parameter placeholder."
-        println "   For example: INSERT into Account (Name,City) values (:name,:city)"
-        println "2) Parameters are not allowed in batch commands."
-      } else {
-        println "Unsupported command: [${command}]. You must select a database before running database commands."
       }
-    } catch(Exception ex) {
-      println "Error: ${ex.getMessage()}"
-      ex.printStackTrace()
-      println ""
+      command = null
     }
-    command = null
   }
+  
+  
+  int timeoutSecs = 600
+  int timeElapsed = 0
+  while(timeElapsed < timeoutSecs) {
+    Thread.sleep(1000)
+    timeElapsed = idleSeconds.addAndGet(1);
+  }
+  println "\nExiting due to no activity for $timeElapsed seconds."
+
 }
 
 
