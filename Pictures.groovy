@@ -29,26 +29,19 @@ import java.util.concurrent.atomic.*
 import java.util.concurrent.*
 
 class ImageFile {
-  String file
-  String ftype 
-  String hash
-  String error = null
-  String errorStack = null
-  Path destFile
-  Path srcFile
-  int size
+  String file, ftype, hash, flags, gpsDescription
+  String error = null, errorStack = null
+  Path destFile, srcFile
+  int size, dbId = -1
   boolean foundEXIF
   Date date = null
-  String flags
-  String gpsDescription
-  double latitude = 0.0
-  double longitude = 0.0
+  double latitude = 0.0, longitude = 0.0
 
   String toString() {
-    if(error != null) return "File: $file Type: $ftype Error: $error"
-    if(date == null) return "File: $file Type: $ftype"
-    if(gpsDescription == null) return "File: $file Type: $ftype Date: $date"
-    return "File: $file Type: $ftype Date: $date Lat(E): $latitude Long(N): $longitude"
+    if(error != null) return "DbID: $dbId File: $file Type: $ftype Error: $error"
+    if(date == null) return "DbID: $dbId File: $file Type: $ftype"
+    if(gpsDescription == null) return "DbID: $dbId File: $file Type: $ftype Date: $date"
+    return "DbID: $dbId File: $file Type: $ftype Date: $date Lat(E): $latitude Long(N): $longitude"
   }
 
   String printDetails() {
@@ -70,6 +63,9 @@ class ImageOrganizer {
   Vector intDuplicates = []
   Vector extDuplicates = []
   def imageCount = new AtomicInteger()
+  def backgroundProcess = new AtomicBoolean()
+  def backgroundProcessName = null
+  Date bgStarted = new Date()
   def sql = null
 
   String srcD = null
@@ -103,13 +99,45 @@ class ImageOrganizer {
   }
   // Private methods
 
-  def loadTempToMemory(images) {
-    sql.eachRow('SELECT * from PicturesTemp') { row ->
-        File file = new File(row.src)
+  
+  def loadImagesfromDir(imgDir) { 
+    Vector filelist = new Vector()
+    if(backgroundProcess) {
+      backgroundProcessName = "Scanning Source Folder ${imgDir}"
+      bgStarted = new Date()
+      imageCount.set(0)
+      totalfiles = 0
+    }
+    
+    Path p = Paths.get(imgDir)
+    p.eachFileRecurse(FileType.FILES) {
+      String fname = it.toString()
+      boolean exclude = false
+      excludes.each {
+        if(fname.endsWith(it)) exclude = true
+      }
+      if(!exclude) filelist.add(fname)
+      if(backgroundProcess) imageCount.incrementAndGet()
+    }
+    return filelist;
+  }
+
+  def loadImagesFromDB(table) {
+    Vector images = new Vector()
+    if(backgroundProcess) {
+      backgroundProcessName = "Reading Table ${table}"
+      bgStarted = new Date()
+      imageCount.set(0)
+      totalfiles = 0
+    }
+    def String query = "SELECT * from $table"
+    sql.eachRow(query) { row ->
       
         ImageFile image = new ImageFile()
+        image.srcFile = Paths.get(destImgDir,row.src)
+        File file = image.srcFile.toFile()
         image.file = file.getAbsolutePath()
-        image.srcFile = Paths.get(row.src)
+        image.dbId = row.id
         
         if(row.createdate != null) image.date = (row.createdate as Date)
         image.ftype = row.filetype
@@ -127,7 +155,9 @@ class ImageOrganizer {
                             +"."+FilenameUtils.getExtension(row.src))
         }
         images.add(image)
+        if(backgroundProcess) imageCount.incrementAndGet()
     }
+    return images
   }
   
   def getBoolInput(prompt) {
@@ -143,7 +173,8 @@ class ImageOrganizer {
           DBHelper.showResults(resultSet, DBHelper.pickColumns(sql, resultSet.getMetaData(), show), 100)
         }
       } catch(e) {
-        System.out.println(e.getMessage())
+        println(e.getMessage())
+        println("io> ")
       }
     }
   }
@@ -159,12 +190,15 @@ class ImageOrganizer {
   def removeImagesWithId(images) {
     if(images.size() > 0) {
       logFile.append("Removing ${images.size()} images.\nID: $images\n")
-      def delCount = sql.withBatch(20, "Delete from PicturesTemp WHERE ID = ?") { ps ->
-        images.each { ps.addBatch(it) }
+      int[] delCount = null
+      sql.withTransaction {
+        delCount = sql.withBatch("Delete from PicturesTemp WHERE ID = ?") { ps ->
+          images.each { ps.addBatch(it) }
+        }
       }
-      sql.commit()
       def deleted = delCount.inject(0) { acc, val -> acc += val } 
       logFile.append("Successfully removed ${deleted} images.\n")
+      print("Successfully removed ${deleted} images.\n")
     }
   }
 
@@ -188,7 +222,12 @@ class ImageOrganizer {
       }
     }
     logFile.append("Found $count duplicate images in the directory: $srcD.\n");
+<<<<<<< HEAD
     if(lines.size() > 0) logFile.append(lines.join("\n")+"\n")
+=======
+    print("Found $count duplicate images in the directory: $srcD.\n");
+    logFile.append(lines.join("\n")+"\n")
+>>>>>>> d05eaa3c04d96f4bd17a8c79c131bdfc8c721f16
   }
   
   def removeDuplicates() {
@@ -213,92 +252,165 @@ class ImageOrganizer {
   }
 
   def importToRepo() {
-    Vector images = [] // has to be Vector so it's thread safe in the loop below
-    loadTempToMemory(images)
-    if(images.size() > 0 ) {
-      def notes = "Importing ${images.size()} images from $srcD"
-      logFile.append(notes+"\n")
-      notes = "'"+notes+"'"
-      def id = sql.executeInsert("INSERT INTO HISTORY (ImgCount, Notes, ImportDate, Status) VALUES (${images.size()}, $notes, NOW, 'P')")
-      def imageImpFile = new AtomicInteger()
-      def imageImpDb = new AtomicInteger()
-      withPool() {
-        images.each {
-          Files.createDirectories(it.destFile.getParent())
-          Files.copy(it.srcFile, it.destFile, StandardCopyOption.REPLACE_EXISTING)
-          imageImpFile.getAndIncrement()
+    if(backgroundProcess.compareAndSet(false, true)) {
+      try {
+        Vector images = loadImagesFromDB("PicturesTemp")      
+        if(images.size() > 0 ) {
+          def notes = "Importing ${images.size()} images from $srcD"
+          
+          backgroundProcessName = notes
+          bgStarted = new Date()
+          imageCount.set(0)
+          totalfiles = images.size()
+          
+          logFile.append(notes+"\n")
+          notes = "'"+notes+"'"
+          def id = sql.executeInsert("INSERT INTO HISTORY (ImgCount, Notes, ImportDate, Status) VALUES (${images.size()}, $notes, NOW, 'P')")
+          def imageImpFile = new AtomicInteger()
+          def imageImpDb = new AtomicInteger()
+          withPool() {
+            images.each {
+              Files.createDirectories(it.destFile.getParent())
+              Files.copy(it.srcFile, it.destFile, StandardCopyOption.REPLACE_EXISTING)
+              imageImpFile.getAndIncrement()
+            }
+            images.each {
+              it.file = it.destFile.toString()
+              insertImage("Pictures", it)
+              imageImpDb.getAndIncrement()
+            }
+          }
+          if( imageImpFile.get() == imageImpDb.get() && imageImpFile.get() == images.size() ) { 
+            sql.execute("DELETE FROM PicturesTemp")
+            sql.execute("UPDATE HISTORY SET Status = 'D' WHERE ID = ${id[0][0]}")
+            logFile.append("Successfully imported ${images.size()} files and also updated the image database.\n")
+            print("Successfully imported ${images.size()} files and also updated the image database.\n")
+            println("io> ")
+          }
+        } else {
+          logFile.append("There were no images to import.\n")
+          print("There were no images to import.\n")
+          println("io> ")
         }
-        images.each {
-          it.file = it.destFile.toString()
-          insertImage("Pictures", it)
-          imageImpDb.getAndIncrement()
-        }
-      }
-      if( imageImpFile.get() == imageImpDb.get() && imageImpFile.get() == images.size() ) { 
-        sql.execute("DELETE FROM PicturesTemp")
-        sql.execute("UPDATE HISTORY SET Status = 'D' WHERE ID = ${id[0][0]}")
-        logFile.append("Successfully imported ${images.size()} files and also updated the image database.\n")
+      } finally {
+        backgroundProcess.set(false);
       }
     } else {
-      logFile.append("There were no images to import.\n")
+      println("Already executing ${backgroundProcessName}, unable to import to repository.")
+      println("io> ")
+    }
+  }
+
+  def checkRepoShallow() {
+    if(backgroundProcess.compareAndSet(false, true)) {
+      try {    
+        def filelist = loadImagesfromDir(destImgDir)
+        def images = loadImagesFromDB("Pictures")
+     
+        def fileListMap = filelist.collectEntries {
+          String key = it.startsWith(destImgDir)?it.drop(destImgDir.size()+1):it
+          [key,it]
+        }
+
+        def imageListMap = images.collectEntries {
+          String key = it.file.startsWith(destImgDir)?it.file.drop(destImgDir.size()+1):it.file
+          [key,it]
+        }
+
+        def missingInDB = filelist.findAll {
+          String key = it.startsWith(destImgDir)?it.drop(destImgDir.size()+1):it
+          imageListMap.containsKey(key)? false : true 
+        }
+
+        def missingInDir = images.findAll {
+          String key = it.file.startsWith(destImgDir)?it.file.drop(destImgDir.size()+1):it.file
+          fileListMap.containsKey(key)? false: true 
+        }
+
+        if( missingInDB.size() > 0 ) {
+          println ("The following files were missing in the database:")
+          missingInDB.eachWithIndex { elem, index -> println ("$index) $elem") }
+        }
+        
+        if( missingInDir.size() > 0 ) {
+          println ("The following files were missing in repository:")
+          missingInDir.eachWithIndex { elem, index -> println ("$index) DbId: $elem.dbId File: $elem.file") }
+        }
+
+        println("Files on disk (${filelist.size()}) and files in the database (${images.size()}) cross checked.") 
+        println("io> ")
+
+      } finally {
+        backgroundProcess.set(false);
+      }
+    } else {
+      println("Already executing ${backgroundProcessName}, unable to check repository.")
+      println("io> ")
     }
   }
 
   def checkRepo() {
     def checkFiles = true
-     
-    println("Checking for interrupted imports ...")
-    def count = executeCommand("SELECT Id, ImportDate, Status from HISTORY WHERE Status = 'P'", true)
-    if(count == 0) {
-      checkFiles = getBoolImput("Nothing untoward found in History do you want to check cache?")
-    }
-    if(checkFiles) {
-      println("Checking for files that are not in the database ...")
-      Path p = Paths.get(destImgDir)
-      def filelist = []
-      p.eachFileRecurse(FileType.FILES) {
-        String fname = it.toString()
-        filelist.add(fname) 
+    if(backgroundProcess.compareAndSet(false, true)) {
+      try {
+        println("Checking for interrupted imports ...")
+        println("io> ")
+        def count = executeCommand("SELECT Id, ImportDate, Status from HISTORY WHERE Status = 'P'", true)
+        if(count == 0) {
+          checkFiles = getBoolImput("Nothing untoward found in History do you want to check cache?")
+        }
+        if(checkFiles) {
+          println("Checking for files that are not in the database ...")
+          println("io> ")
+        
+          bgStarted = new Date()
+          imageCount.set(0)
+          others = []
+          totalfiles = filelist.size()
+ 
+          def found = []
+          withPool() {
+            found = filelist.collect { processFileTika(it, true) }
+          }
+          def updates = found.inject(0) { acc, val -> 
+            if(val) acc += 1
+            return acc
+          }
+          print("Discoverd $updates new images not in the database.")
+          sql.execute("UPDATE HISTORY SET Status = 'R' WHERE Status = 'P'") 
+        }
+      } finally {
+        backgroundProcess.set(false);
       }
-
-      imageCount.set(0)
-      others = []
-      totalfiles = filelist.size()
-
-      def found = []
-      withPool() {
-        found = filelist.collect { processFileTika(it, true) }
-      }
-      def updates = found.inject(0) { acc, val -> 
-        if(val) acc += 1
-        return acc
-      }
-      print("Discoverd $updates new images not in the database.")
-      sql.execute("UPDATE HISTORY SET Status = 'R' WHERE Status = 'P'") 
+    } else {
+      println("Already executing ${backgroundProcessName}, unable to check image repository.")
+      println("io> ")
     }
   }
 
   def processFiles() {
-    logFile.append("Importing files from ${srcD} into temporary database for analysis.\n")
-    Path p = Paths.get(srcD)
-    def filelist = []
-    p.eachFileRecurse(FileType.FILES) {
-      String fname = it.toString()
-      boolean exclude = false
-      excludes.each {
-        if(fname.endsWith(it)) exclude = true
-      }
-      if(!exclude) filelist.add(fname) 
-    }
+    if(backgroundProcess.compareAndSet(false, true)) {
+      try {
+        logFile.append("Importing files from ${srcD} into temporary database for analysis.\n")
+        def filelist = loadImagesfromDir(srcD)
 
-    imageCount.set(0)
-    others = []
-    totalfiles = filelist.size()
+        bgStarted = new Date()
+        imageCount.set(0)
+        backgroundProcessName = "Read Image Metadata"
+        others = []
+        totalfiles = filelist.size()
     
-    withPool() {
-      filelist.each { processFileTika(it, false) }
+        withPool() {
+          filelist.each { processFileTika(it, false) }
+        }
+        logFile.append("Found ${imageCount.get()} images and ${others.size()} other unrecognized files from $totalfiles files in directory $srcD.\n")
+      } finally {
+        backgroundProcess.set(false);
+      }
+    } else {
+      println("Already executing ${backgroundProcessName}, unable to process source folder.")
+      println ("Set backgroundProcess to false --> $backgroundProcess")
     }
-    logFile.append("Found ${imageCount.get()} images and ${others.size()} other unrecognized files from $totalfiles files in directory $srcD.\n")
   }
 
   def processFileTika(imageFile, checkCache) {
@@ -352,7 +464,6 @@ class ImageOrganizer {
         image.errorStack = ExceptionUtils.getStackTrace(all)
       }
       if(image.foundEXIF) {
-        imageCount.getAndIncrement()
         insert = true
         def table =  "PicturesTemp"
         if(checkCache) {
@@ -363,43 +474,37 @@ class ImageOrganizer {
         if(insert) insertImage(table, image)
       }
       else others.add(image)
+      imageCount.getAndIncrement()
       return insert 
   }
 }
 
-def cli = new CliBuilder(usage:'Pictures.groovy -s SourceDirectory')
+def cli = new CliBuilder(usage:'Pictures.groovy [-s SourceDirectory| -h]')
 cli.with {
   h longOpt: 'help', 'Show usage information.'
   s longOpt: 'source', args: 1, argName: 'src', 'The source directory in which to look for image files.'
-  e longOpt: 'exclude', args: 1, argName: 'exclude', 'Comma separated list of extensions to exclude in the source directory.'
-  a longOpt: 'auto', args: 1, argName: 'auto', 'Automatically remove duplicates and add files that are not in the repository.'
 }
 
 def options = cli.parse(args)
-  
-if(!options || options.h || args.length == 0) {
+
+boolean keepProcessing = true  
+if(!options || options.h) {
   cli.usage()
-  return
+  keepProcessing = false
 }
 
-def extraArgs = options.arguments()
+String src = null
 
-String src = "."
-
-//if(options.a) auto = options.d
 if(options.s) src = options.s
 
 def io = new ImageOrganizer(srcD: src)
 if(options.e) io.excludes = options.e.tokenize(",")
 
-Date timeStarted = new Date()
-
-Thread.startDaemon {
-  io.processFiles()
+if (src != null) {
+  Thread.startDaemon {io.processFiles()}
 }
 
 
-boolean keepProcessing = true
 def prompt = "io> "
 def command = null
 
@@ -410,7 +515,7 @@ while(keepProcessing) {
   if(cmd[0] == "help") {
     println "The following commands are supported:"
     println "exit               Exit the program."
-    println "status             Print status."
+    println "status             Print status of the currently running background operation."
     println "select ...         Any query against the picture database [Table:Pictures, History, PicturesTemp]."
     println "others             Print the names of the files that were not recognized as images."
     println "dedup              Find duplicates based on hash and report them."
@@ -419,10 +524,19 @@ while(keepProcessing) {
   } else if (cmd[0] == "exit") {
     keepProcessing = false
   } else if (cmd[0] == "status") {
-    Date now = new Date()
-    double percentDone = ((((io.imageCount.get() + io.others.size())/(double)io.totalfiles)*10000.0) as int)/100 //
-    println "Time Elapsed: ${TimeCategory.minus(now,timeStarted)} Total Files: ${io.totalfiles} Files Processed (%): ${percentDone}"
-    println "Found ${io.imageCount.get()} images and ${io.others.size()} other unrecognized files."
+    if(io.backgroundProcess.get()) {
+      now = new Date()
+      println("Process: $io.backgroundProcessName")
+      println "Time Elapsed: ${TimeCategory.minus(now,io.bgStarted)}"
+      println "Processed ${io.imageCount.get()} files."
+      if(io.totalfiles != 0 ) {
+        double percentDone = (((io.imageCount.get()/(double)io.totalfiles)*10000) as int)/100 //
+        println "Total Files: ${io.totalfiles} Files Processed (%): ${percentDone}"
+      }
+    }
+    else {
+      println("There is no background process. Nothing to report.")
+    }
   } else if (cmd[0] == "others" || cmd[0] == "other") {
     if( cmd.size() > 1 && cmd[1].isInteger()) {
       int index = cmd[1] as int
@@ -437,16 +551,10 @@ while(keepProcessing) {
     }
   } else if (cmd[0] == "dedup") {
     io.findDuplicates()
-    if(io.getBoolInput("Do you want to remove duplicates shown")) {
-      io.removeDuplicates()
-      println "Duplicate images have been removed from the temp database."
-    }
+    io.removeDuplicates()
     println "Finding images that already exist in the master repository."
     io.findInRepo()
-    if(io.getBoolInput("Do you want to remove existing images")) {
-      io.removeExisting()
-      println "Existing images have been removed from the temp database."
-    }
+    io.removeExisting()
   } else if(cmd[0] =="select") {
     io.executeCommand(command)
   } else if(cmd[0] =="import") {
@@ -458,7 +566,7 @@ while(keepProcessing) {
       io.importToRepo()
     }
   } else if(cmd[0] =="check") {
-    io.checkRepo()
+    io.checkRepoShallow()
   } else {
     println "Invalid command. Please type help to see your options."
   }
