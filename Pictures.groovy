@@ -223,12 +223,7 @@ class ImageOrganizer {
       }
     }
     logFile.append("Found $count duplicate images in the directory: $srcD.\n");
-<<<<<<< HEAD
     if(lines.size() > 0) logFile.append(lines.join("\n")+"\n")
-=======
-    print("Found $count duplicate images in the directory: $srcD.\n");
-    logFile.append(lines.join("\n")+"\n")
->>>>>>> d05eaa3c04d96f4bd17a8c79c131bdfc8c721f16
   }
   
   def removeDuplicates() {
