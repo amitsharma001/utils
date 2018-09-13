@@ -134,7 +134,8 @@ class ImageOrganizer {
     sql.eachRow(query) { row ->
       
         ImageFile image = new ImageFile()
-        image.srcFile = Paths.get(destImgDir,row.src)
+        image.srcFile = Paths.get(row.src)
+        if(table == "Pictures") image.srcFile = Paths.get(destImgDir,row.src)
         File file = image.srcFile.toFile()
         image.file = file.getAbsolutePath()
         image.dbId = row.id
@@ -237,7 +238,7 @@ class ImageOrganizer {
     logFile.append("Looking for images that already exist in repository.\n")
     sql.eachRow("SELECT T.ID as ID, T.SRC as SRC, P.SRC as RepoSrc FROM Pictures AS P INNER JOIN PicturesTemp AS T ON P.md5 = T.md5") { row ->
       extDuplicates.add(row.id as int)
-      lines.add("Image: ${row.src} Repository: ${row.RepoSrc}")
+      lines.add("${lines.size()+1}) {Image: ${row.src} In Repository: ${row.RepoSrc}")
     }
     logFile.append("Found ${lines.size()} images that already exist in the repository.\n");
     print("Found ${lines.size()} images that already exist in the repository.\n");
@@ -265,10 +266,12 @@ class ImageOrganizer {
           def id = sql.executeInsert("INSERT INTO HISTORY (ImgCount, Notes, ImportDate, Status) VALUES (${images.size()}, $notes, NOW, 'P')")
           def imageImpFile = new AtomicInteger()
           def imageImpDb = new AtomicInteger()
+          def importedImages = new Vector()
           withPool() {
             images.each {
               Files.createDirectories(it.destFile.getParent())
               Files.copy(it.srcFile, it.destFile, StandardCopyOption.REPLACE_EXISTING)
+              importedImages.add("${importedImages.size()+1}) Image: ${it.srcFile} Imported To: ${it.destFile}")
               imageImpFile.getAndIncrement()
             }
             images.each {
@@ -280,6 +283,7 @@ class ImageOrganizer {
           if( imageImpFile.get() == imageImpDb.get() && imageImpFile.get() == images.size() ) { 
             sql.execute("DELETE FROM PicturesTemp")
             sql.execute("UPDATE HISTORY SET Status = 'D' WHERE ID = ${id[0][0]}")
+            logFile.append(importedImages.join("\n")+"\n")
             logFile.append("Successfully imported ${images.size()} files and also updated the image database.\n")
             print("Successfully imported ${images.size()} files and also updated the image database.\n")
             println("io> ")
@@ -403,11 +407,26 @@ class ImageOrganizer {
         logFile.append("Found ${imageCount.get()} images and ${others.size()} other unrecognized files from $totalfiles files in directory $srcD.\n")
       } finally {
         backgroundProcess.set(false);
+        println()
+        printStatus()
+        println("io> ")
+
       }
     } else {
       println("Already executing ${backgroundProcessName}, unable to process source folder.")
       println ("Set backgroundProcess to false --> $backgroundProcess")
     }
+  }
+
+  def printStatus() {
+      def now = new Date()
+      println("Process: $backgroundProcessName")
+      println "Time Elapsed: ${TimeCategory.minus(now,bgStarted)}"
+      println "Processed ${imageCount.get()} files."
+      if(totalfiles != 0 ) {
+        double percentDone = (((imageCount.get()/(double)totalfiles)*10000) as int)/100 //
+        println "Total Files: ${totalfiles} Files Processed (%): ${percentDone}"
+      }
   }
 
   def processFileTika(imageFile, checkCache) {
@@ -520,14 +539,7 @@ while(keepProcessing) {
     keepProcessing = false
   } else if (cmd[0] == "status") {
     if(io.backgroundProcess.get()) {
-      now = new Date()
-      println("Process: $io.backgroundProcessName")
-      println "Time Elapsed: ${TimeCategory.minus(now,io.bgStarted)}"
-      println "Processed ${io.imageCount.get()} files."
-      if(io.totalfiles != 0 ) {
-        double percentDone = (((io.imageCount.get()/(double)io.totalfiles)*10000) as int)/100 //
-        println "Total Files: ${io.totalfiles} Files Processed (%): ${percentDone}"
-      }
+      io.printStatus()
     }
     else {
       println("There is no background process. Nothing to report.")
