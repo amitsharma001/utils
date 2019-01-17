@@ -1,8 +1,10 @@
 {
 	"config": {
 		"logdir": "D:\\Logs\\",
-		"verbosity" : "2",
-                "pagesize" : "-1",
+                "driverJ7": "\\\\NAS1\\builds\\CData\\Publish\\lib\\jdbc",
+                "driverLocal": "C:\\dev\\RSSBus\\v18\\Release",
+		"verbosity" : "3",
+                "pagesize" : "100",
                 "showkeys" : false,
                 "cacheconnection" : "jdbc:postgresql://localhost:5432/CacheTest?user=test&password=test",
                 "cachedriver" : "org.postgresql.Driver", 
@@ -13,50 +15,56 @@
 			"name":"sf",
 			"connection":"jdbc:salesforce:User=support@nsoftware.com;Password=!rssbus;",
 			"driver":"cdata.jdbc.salesforce.SalesforceDriver",
-			"jar": [
-				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderSalesforce\\kits\\jdbc\\lib\\cdata.jdbc.salesforce.jar",
-				"C:\\dev\\rssbus\\trunk\\Release\\ProviderSalesforceV4\\kits\\jdbc\\lib\\cdata.jdbc.salesforce.jar"
-			]
 		},
+		{
+			"name":"qb",
+			"connection":"jdbc:quickbooks:URL='http://10.0.1.229:8166';user=test;password=test;",
+			"driver":"cdata.jdbc.quickbooks.QuickBooksDriver",
+		},
+		{
+			"name":"sp",
+			"connection":"jdbc:sharepoint:User='Administrator';Password='nSoftware1111';URL='http://freezesp';UseDisplayNames=False;CalculatedDataType=String;",
+			"driver":"cdata.jdbc.sharepoint.SharePointDriver",
+                },
+		{
+			"name":"sponline",
+			"connection":"jdbc:sharepoint:User='info@rssbuscrm.onmicrosoft.com';Password='nsoftware1112!';URL='https://rssbuscrm.sharepoint.com';UseDisplayNames=False;SharePointEdition='SharePoint Online';",
+			"driver":"cdata.jdbc.sharepoint.SharePointDriver",
+                },
 		{
 			"name":"mysql",
 			"connection":"jdbc:mysql:User=root;Password=test;Server=M;Database=test",
 			"driver":"cdata.jdbc.mysql.MySQLDriver",
-			"jar": [
-				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderMySQL\\kits\\jdbc\\lib\\cdata.jdbc.mysql.jar"
-			]
 		},
                 {
 			"name":"couchbase",
 			"connection":"jdbc:couchbase:User=Administrator;Password=nsoftware1111;Server=http://couchbase40;",
 			"driver":"cdata.jdbc.couchbase.CouchbaseDriver",
-			"jar": [
-				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderCouchBase\\kits\\jdbc\\lib\\cdata.jdbc.couchbase.jar"
-			]
 		},
 		{
 			"name":"mysqlrem",
 			"connection":"jdbc:mysql:User=test;Password=test;Server=localhost;Port=3306;Database=remotedb",
 			"driver":"cdata.jdbc.mysql.MySQLDriver",
-			"jar": [
-				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderMySQL\\kits\\jdbc\\lib\\cdata.jdbc.mysql.jar"
-			]
                 },
 		{
-			"name":"mongo",
-			"connection":"jdbc:mongodb:Server=BEN-PC;Port=27117;User=test;Password=test;Database=test;",
-			"driver":"cdata.jdbc.mongodb.MongoDBDriver",
-			"jar": [
-				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderMongoDB\\kits\\jdbc\\lib\\cdata.jdbc.mongodb.jar"
-			]
+			"name":"twitter",
+			"connection":"jdbc:twitter",
+			"driver":"cdata.jdbc.twitter.TwitterDriver",
 		},
-                {
-			"name":"mongom",
-			"connection":"jdbc:mongodb:Server=MITCHGRAW;Port=27017;User=;Password=;Database=test;",
+		{
+			"name":"mongo",
+			"connection":"jdbc:mongodb:Server=BEN-PC;Port=27117;User=test;Password=test;Database=test;SupportEnhancedSQL=False;",
 			"driver":"cdata.jdbc.mongodb.MongoDBDriver",
-			"jar": [
-				"\\\\J4\\dev\\rssbus\\v5\\Release\\ProviderMongoDB\\kits\\jdbc\\lib\\cdata.jdbc.mongodb.jar"
-			]
+		},
+		{
+			"name":"quandl",
+			"connection":"jdbc:quandl:APIKey=xUyDJg_tBsd_53MFxGZD;DatabaseCode=AAII;",
+			"driver":"cdata.jdbc.quandl.QuandlDriver",
+                },
+		{
+			"name":"eloqua",
+			"connection":"jdbc:eloqua:Password=RSSBus111;Company=TechnologyPartnerRSSBusInc;User=Amit.Sharma;",
+			"driver":"cdata.jdbc.eloqua.EloquaDriver",
                 }
 	]
 }
