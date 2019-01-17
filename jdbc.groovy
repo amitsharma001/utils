@@ -3,7 +3,7 @@ import groovy.json.*
 import groovy.time.*
 import java.util.concurrent.atomic.AtomicInteger
 
-static showResults(resultSet,cols, pagesize = 200) { 
+static showResults(resultSet,cols, pagesize = 500, options = "") { 
   def totalLength = 0
   def maxWidth = 25
   def border = ''
@@ -108,7 +108,7 @@ static pickColumns(sql, metadata, showKeys = false) {
   // get anything called Id, AccountID etc.
   allCols.each {k, v -> if (pk.contains(k)) selectedCols[k] = v}
   
-  // get anything that matche name or number
+  // get anything that matches name or number
   allCols.each { k, v ->
     if (selectedCols.size() >= 5) return;
     if (k =~ /(name|number)/ && !selectedCols.containsKey(k)) selectedCols[k] = v
@@ -121,18 +121,16 @@ static pickColumns(sql, metadata, showKeys = false) {
   return selectedCols
 }
 
-static showDataBase(d, jarindex=-1, connstr=null) {
+static showDataBase(d, jarfile=null, connstr=null) {
   if(connstr == null) connstr = d.connection
   println "Name      : ${d.name}"
   println "Connection: ${connstr}"
   println "Driver    : ${d.driver}"
-  d.jar.eachWithIndex { jar, i ->
-    if( jarindex == -1 || jarindex == (i+1)) {
-      def javacall = ["java","-jar",jar,"--version"]
-      def response = javacall.execute().text.readLines()
-      println "Jar [${i+1}]   : ${jar}"
-      println "Version   : ${response[1]}"
-    }
+  if( jarfile != null) {
+    def javacall = ["java","-jar",jarfile.getAbsolutePath(),"--version"]
+    def response = javacall.execute().text.readLines()
+    println "Jar       : ${jarfile.getAbsolutePath()}"
+    println "Version   : ${response[1]}"
   }
 }
 
@@ -208,6 +206,11 @@ static main(String[] args) {
             params[name] = pvalue
           }
           def timeStart = new Date()
+          def selectOptions = ""
+          if(commandA[-1] =~ /\[.*\]/) {
+            selectOptions = commandA[-1]
+            command = commandA[0..-2].join(" ")
+          }
           sql.query(command, params) { resultSet ->  
             showResults(resultSet, pickColumns(sql, resultSet.getMetaData(), connJ.config.showkeys), connJ.config.pagesize)
           } 
@@ -237,6 +240,28 @@ static main(String[] args) {
               }
             }
             println "Generated Keys: ${results}"
+        } else if(sql != null && (commandA[0] == "perf" || commandA[0] == "performance")) {
+            def pquery = System.console().readLine "Query: "
+            def runs = (System.console().readLine("Runs: ")) as int
+            Runtime r = Runtime.getRuntime()
+            TimeDuration totalTime = new TimeDuration(0,0,0,0)
+            int MB = 1024*1024
+            println "Starting Performance Test"
+            printf "Max Memory: %.2f Total Memory %.2f Free Memory %.2f\n", r.maxMemory()/MB, r.totalMemory()/MB, r.freeMemory()/MB //
+            runs.times { runNum ->
+              def timeStart = new Date()
+              def rows=0, cols=0
+              sql.query(pquery) { resultset -> 
+                cols = resultset.getMetaData().getColumnCount()
+                while(resultset.next()) { cols.times { resultset.getObject(it+1) }; rows++ } // read all the columns
+              }
+              TimeDuration runtime = TimeCategory.minus(new Date(), timeStart)
+              totalTime = totalTime + runtime
+              printf "Run %2d) Rows: %d Time: %6s TotalMemory %.2f FreeMemory %.2f\n", 
+                      runNum+1, rows, runtime, r.totalMemory()/MB, r.freeMemory()/MB //
+              //println "Run: ${runNum+1} Time: $runtime Max Memory: ${r.maxMemory()/MB} Total Memory: ${r.totalMemory()/MB} Free Memory: ${r.freeMemory()/MB}"
+            }
+            println "Average Time: ${totalTime.seconds/runs}"
         } else if(sql != null && (commandA[0] == "show" && commandA[1] == "tables")) {
             showTables(sql)
         } else if(sql !=null && commandA[0].startsWith("desc")) {
@@ -249,29 +274,34 @@ static main(String[] args) {
           showDataBases(connJ)
         } else if(commandA[0] == "use") {
           driver = connJ.connections.find {k -> k.name == commandA[1];}
-          def chosenjar = 1, jarindex = "1"
-          if(commandA.size() > 2 && commandA[2] != null) jarindex = commandA[2].find(/(\d+)/)
-          if(jarindex != null && jarindex.isInteger()) chosenjar = jarindex as int 
+          def jarlocation = "J7"
+          if(commandA.size() > 2 && commandA[2] != null) jarlocation = commandA[2]
           if(driver != null) {
-            if(chosenjar > 0 && chosenjar <= driver.jar.size()) {
-              File df = new File(driver.jar[chosenjar-1])
-              if (df.exists()) {
-                def connstr = getConnection(driver,connJ.config)
-                if(commandA.size() > 3 && commandA[3] != null) connstr += ";"+commandA[3]
-                showDataBase(driver, chosenjar, connstr)
-                this.getClass().classLoader.rootLoader.addURL((new File(driver.jar[chosenjar-1])).toURL())
-                sql = Sql.newInstance(connstr, '', '', driver.driver)
-                prompt = "${driver.name} [$chosenjar]>"
-              } else {
-                println "The selected jar ${driver.jar[chosenjar-1]} does not exist."
-              }
+            File df = null
+            // 1 load the jar from J7
+            if(jarlocation.toLowerCase() == "j7") df = new File(connJ.config.driverJ7 + "\\" + "cdata.jdbc."+driver.driver.tokenize('.')[2]+".jar")
+            else if(jarlocation.toLowerCase() == "local") {
+              def objname = driver.driver.tokenize('.')[2]
+              df = new File(connJ.config.driverLocal + "\\Provider" + objname+ "\\" + "cdata.jdbc." + objname + ".jar")
+            }
+            else {
+              println "Invalid choice ${jarlocation}. Choose between J7 or local."
+            }
+            // load J7 jar by default
+            if (df.exists()) {
+              def connstr = getConnection(driver,connJ.config)
+              if(commandA.size() > 3 && commandA[3] != null) connstr += ";"+commandA[3]
+              showDataBase(driver, df, connstr)
+              this.getClass().classLoader.rootLoader.addURL(df.toURL())
+              sql = Sql.newInstance(connstr, '', '', driver.driver)
+              prompt = "${driver.name}>"
             } else {
-              println "There are only ${driver.jar.size()} jars available for the database [${driver.name}]."
+              println "The selected jar ${df.getAbsolutePath()} does not exist."
             }
           } else {
             println "Database ${commandA[1]} not found."
           }
-        } else if(commandA[0] == "config") {
+      } else if(commandA[0] == "config") {
           if( commandA.size() != 3 ) println "Config must be specified as: config [name] [value]"
           connJ.config[commandA[1]] = commandA[2]
         } else if(commandA[0] == "q" || commandA[0] == "exit" || commandA[0] == "quit" ) {
@@ -289,6 +319,7 @@ static main(String[] args) {
           println "fkeys [table];          Lists the foreign keys in the table."
           println "describe [table];       Lists the columns in the table."
           println "start batch;            Start a batch command to insert/update/delete."
+          println "start performance;      Start a performance test."
           println "help;                   This help."
           println "config {name} {value}   Change a config setting read from the connections.json."
           println "exit;                   Exits this program."
