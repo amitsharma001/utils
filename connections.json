@@ -2,7 +2,7 @@
 	"config": {
 		"logdir": "D:\\Logs\\",
                 "driverJ7": "\\\\NAS1\\builds\\CData\\Publish\\lib\\jdbc",
-                "driverLocal": "C:\\dev\\RSSBus\\v18\\Release",
+                "driverLocal": "D:\\Software\\JDBC\\lib",
 		"verbosity" : "3",
                 "pagesize" : "100",
                 "showkeys" : false,
@@ -27,6 +27,11 @@
 			"driver":"cdata.jdbc.sharepoint.SharePointDriver",
                 },
 		{
+			"name":"snowflake",
+			"connection":"jdbc:snowflake:Url=https://uj34980.us-east-1.snowflakecomputing.com;User=CDataSoftware;Account=uj34980;Password=nSoftware111!;Warehouse=SAMPLE_WAREHOUSE;Database=DEMO_DB;Schema=Public",
+			"driver":"cdata.jdbc.snowflake.SnowflakeDriver",
+                },
+		{
 			"name":"sponline",
 			"connection":"jdbc:sharepoint:User='info@rssbuscrm.onmicrosoft.com';Password='nsoftware1112!';URL='https://rssbuscrm.sharepoint.com';UseDisplayNames=False;SharePointEdition='SharePoint Online';",
 			"driver":"cdata.jdbc.sharepoint.SharePointDriver",
@@ -38,7 +43,7 @@
 		},
                 {
 			"name":"couchbase",
-			"connection":"jdbc:couchbase:User=Administrator;Password=nsoftware1111;Server=http://couchbase40;",
+			"connection":"jdbc:couchbase:User=Administrator;Password=nBanana1;Server=10.0.1.125;",
 			"driver":"cdata.jdbc.couchbase.CouchbaseDriver",
 		},
 		{
@@ -53,7 +58,7 @@
 		},
 		{
 			"name":"mongo",
-			"connection":"jdbc:mongodb:Server=BEN-PC;Port=27117;User=test;Password=test;Database=test;SupportEnhancedSQL=False;",
+			"connection":"jdbc:mongodb:Server=testservers;Port=27017;User=test;Password=test;Database=test;AuthDatabase=admin;",
 			"driver":"cdata.jdbc.mongodb.MongoDBDriver",
 		},
 		{
