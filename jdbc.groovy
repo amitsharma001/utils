@@ -104,22 +104,11 @@ static showImportedKeys(sql, table) {
 }
 
 
-static getPK(sql, table) {
-  def meta = sql.connection.metaData
-  def keys = meta.getPrimaryKeys(null, null, table)
-  def pk = []
-  while(keys.next()) {
-    pk.add(keys.getString("COLUMN_NAME"))
-  }
-  return pk
-}
-
-static pickColumns(sql, metadata, showKeys = false) {
+static pickColumns(sql, metadata) {
   def selectedCols = [:]
   def allCols = [:]
   def pk = []
   for(int i=1; i<=metadata.getColumnCount(); i++) {
-    if(i == 1 && showKeys) pk = getPK(sql,metadata.getTableName(i))
     def size = metadata.getPrecision(i)
     def type = metadata.getColumnTypeName(i);
     if(type == "TIMESTAMP") size = 22
@@ -322,7 +311,7 @@ static main(String[] args) {
             command = commandA[0..-2].join(" ")
           }
           sql.query(command, params) { resultSet ->  
-            showResults(resultSet, pickColumns(sql, resultSet.getMetaData(), connJ.config.showkeys), connJ.config.pagesize)
+            showResults(resultSet, pickColumns(sql, resultSet.getMetaData()), connJ.config.pagesize)
           } 
           TimeDuration duration = TimeCategory.minus(new Date(), timeStart)
           println "Total Time: $duration"
