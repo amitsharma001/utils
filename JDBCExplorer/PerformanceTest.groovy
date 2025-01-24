@@ -6,7 +6,7 @@ import static groovyx.gpars.GParsPool.withPool;
 class PerformanceTest {
     ConnectionManager connManager;
     String query;
-    List results; 
+    List results = []; 
     int rowInterval = 25000;
     int threads = 1;
     int runs = 3;
@@ -35,7 +35,7 @@ class PerformanceTest {
         withPool(threads) {
             (1..runs).collectParallel() {
                 def timeStart = new Date();
-                Date lastIntervalTime = timeStart = null;
+                Date lastIntervalTime = timeStart;
                 int tid = Thread.currentThread().getId();
                 int rows=0, cols=0;
                 printf "\n*** Starting Run %d Thread %d ***\n", it, tid;
@@ -56,12 +56,10 @@ class PerformanceTest {
                 } catch (Exception ex) {
                     println "Thread: $tid Error at row $rows: ${ex.message}";
                     runtime = new TimeDuration(0, 0, 0, 0);
-                } finally {
-                    sql.close();
                 }
-                results << [runtime, rows, cols];
+                results.add([runtime, rows, cols]);
             }
-            totalRuntime = TimeCategory.minus(new Date(), testStartTime);
+            totalRuntime = TimeCategory.minus(new Date(), testRunTime);
         }
     }
 
@@ -84,11 +82,10 @@ class PerformanceTest {
             perfResults <<= "\nRuns: $runs Threads: $threads";
             perfResults <<= "\nAverage time: ${totalTime/success} ms ($avg) per thread.";
             perfResults <<= "\nTotal time taken for $runs runs: ${totalRuntime.toMilliseconds()}ms ($totalRuntime)\n";
+            println perfResults;
+            File fpr = new File(connManager.jsonObj.config.logdir + File.separator + connManager.selectedConnection.driver+".perf.txt");
+            fpr.withWriterAppend { out -> out.println(perfResults); }
         }
-        println perfResults;
-        File fpr = new File(connManager.logdir + File.separator + connManager.driver.driver+".perf.txt")
-        fpr.append(perfResults);
-        fpr.close();
     }
 }
 
