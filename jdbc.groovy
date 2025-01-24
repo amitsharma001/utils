@@ -1,6 +1,7 @@
 import groovy.sql.Sql
 import groovy.json.*
 import groovy.time.*
+import groovy.cli.commons.CliBuilder
 import java.util.concurrent.atomic.AtomicInteger
 import static groovyx.gpars.GParsPool.withPool
 
@@ -61,21 +62,75 @@ static showTables(sql) {
   showResults(tables, metadataCols)
 }
 
+static writeResultSetToFile(resultSet,filename,table='',columns) {
+  if (!resultSet) {
+    println "Result set is empty. Nothing to write."
+    return
+  }
+  boolean hasLastModifiedDate = false
+  def f = new File(filename)
+  def headers = ""
+  if(!f.exists()) headers = columns.join(", ")   
+  
+  new File(filename).withWriterAppend { writer ->
+    if (headers != "") writer.writeLine(headers)
+    while(resultSet.next()) {
+      def rowvalues = ""
+      def first = true
+      for(column in columns) {
+        def value = resultSet.getString(column)
+        if (value.equals("lastmodifieddate")) hasLastModifiedDate = true
+        if (first) first = false
+        else rowvalues += ", "
+        rowvalues += value
+      }
+      writer.writeLine(rowvalues)
+    }
+  }
+  //if(hasLastModifiedDate) printf("Table %s has LastModifiedDate.\n",table)
+  //else printf("Table %s does not have LastModifiedDate.\n",table)
+}
+
+static writeMetaData(sql) {
+  def meta = sql.connection.metaData
+  def tables = meta.getTables(null, null,'%', null)
+  def tableColumns = ["TABLE_CAT","TABLE_SCHEM","TABLE_NAME"] 
+  writeResultSetToFile(tables,"Tables.csv","Metadata",tableColumns)
+  printf("Written Tables.csv, now writing column information.\n")
+  tables = meta.getTables(null, null,'%', null)  
+  while(tables.next()) {
+    def table = tables.getObject("Table_Name").toString()
+    try {
+      def cols = meta.getColumns(null, null, table, null)
+      writeResultSetToFile(cols,"Columns.csv",table,["TABLE_NAME","COLUMN_NAME","DATA_TYPE","TYPE_NAME","COLUMN_SIZE"])
+      printf("Written %s - metadata for %s\n",table,table)
+    } catch(Exception e) {
+      printf("Could not get metadata for %s due to error: %s\n",table,e.Message)
+    }
+  }
+}
+
 static showMetadata(sql, tablePattern='%') {
   def meta = sql.connection.metaData 
   def tables = meta.getTables(null, null, tablePattern, null)  
   def count = 0;
   while(tables.next()) {
-    count++
     def table = tables.getObject("Table_Name").toString()
-    def cols = meta.getColumns(null, null, table, null)
-    def cquery = "SELECT count(*) as CNT from ["+table+"]"
-    def rows = sql.rows(cquery)["CNT"][0]
-    printf("\n\n%d) %s: %d rows\n Columns: ",count,table, rows)
-    while(cols.next()) {printf("%s (%s), ",cols.getObject("Column_Name").toString(), cols.getObject("Type_Name").toString())}
-    if(count % 10 == 0) {
-      print "\n\nDo you want to see more tables [Y/N]? "
-      if(System.console().readLine().toLowerCase() == 'n') break;
+    try {
+      count++
+      def cols = meta.getColumns(null, null, table, null)
+      def cquery = "SELECT count(*) as CNT from ["+table+"]"
+      def rows = sql.rows(cquery)["CNT"][0]
+      printf("\n\n%d) %s: %d rows\n Columns: ",count,table, rows)
+      while(cols.next()) {
+        printf("%s (%s), ",cols.getObject("Column_Name").toString(), cols.getObject("Type_Name").toString())
+      }
+      if(count % 10 == 0) {
+        print "\n\nDo you want to see more tables [Y/N]? "
+        if(System.console().readLine().toLowerCase() == 'n') break;
+      }
+    } catch (Exception e){
+      printf("Could not get metadata for table %s\n",table)
     }
   }
   println "\n"
@@ -133,25 +188,26 @@ static pickColumns(sql, metadata) {
   return selectedCols
 }
 
-static getJarFile(driver, connJ, jarlocation="J7") {
+static getJarFile(driver, connJ, jarlocation="local") {
   File df = new File("")
   if(driver != null) {
     if (driver.jar != null) {
       df = new File(driver.jar)
     }
-    else if(jarlocation.toLowerCase() == "j7") df = new File(connJ.config.driverJ7 + "\\" + "cdata.jdbc."+driver.driver.tokenize('.')[2]+".jar")
+    else if(jarlocation.toLowerCase() == "j7") 
+      df = new File(connJ.config.driverlocal + File.separator + "cdata.jdbc."+driver.driver.tokenize('.')[2]+".jar")
     else if(jarlocation.toLowerCase() == "local") {
       def objname = driver.driver.tokenize('.')[2]
-      df = new File(connJ.config.driverLocal + "\\Provider" + objname+ "\\" + "cdata.jdbc." + objname + ".jar")
+      df = new File(connJ.config.driverLocal + File.separator + "cdata.jdbc." + objname + ".jar")
     }
     else {
-      println "Invalid choice ${jarlocation}. Choose between J7 or local."
+      println "Invalid choice ${jarlocation}. Choose between local or local."
     }
   }
   return df
 }
 
-static getSQLInstance(driver, connJ, classLoader=null, showDatabaseDetails=false, jarlocation="J7") {
+static getSQLInstance(driver, connJ, classLoader=null, showDatabaseDetails=false, jarlocation="local") {
   def sql = null
   if(driver != null) {
     File df = getJarFile(driver, connJ, jarlocation)
@@ -233,9 +289,11 @@ static getConnection(driver, config) {
   def connstr = driver.connection
   if(driver.jar == null) { // Jar files are specified for Third-Party drivers
     if(!connstr.endsWith(";")) connstr += ";"
-    if(config.logdir != null) connstr += "Logfile=${config.logdir}\\\\${driver.name}.txt;"
-    if(config.cachedriver != null) connstr += "CacheDriver=${config.cachedriver};"
-    if(config.cacheconnection != null) connstr += "CacheConnection=${config.cacheconnection};"
+    if(config.logdir != null) connstr += "Logfile=${config.logdir}" + File.separator + "${driver.name}.txt;"
+    if(config.cacheconnection?.trim()) {
+      connstr += "CacheConnection=${config.cacheconnection};"
+      connstr += "CacheDriver=${config.cachedriver};"
+    }
     if(config.verbosity != null && config.verbosity.isInteger()) connstr += "Verbosity=${config.verbosity}"
   }
   return connstr
@@ -250,7 +308,7 @@ static showDataBases(connJ) {
 }
 
 static main(String[] args) {
-  selectedCols = []
+  //selectedCols = []
 
   def cli = new CliBuilder(usage:'jdbc')
   cli.f(longOpt:'file',args:1,'The connections file. If none is specified connections.json is read.')
@@ -365,15 +423,17 @@ static main(String[] args) {
               perfResults <<= "\nQuery: $pquery, Rows: $rows, Cols: $cols"
               perfResults <<= "\nRuns: $runs Threads: $threads"
               perfResults <<= "\nAverage time: ${totalTime/success} ms ($avg) per thread."
-              perfResults <<= "\nTotal time taken for $runs runs: ${totalRuntime.toMilliseconds()} ($totalRuntime)\n" 
+              perfResults <<= "\nTotal time taken for $runs runs: ${totalRuntime.toMilliseconds()}ms ($totalRuntime)\n" 
               println perfResults
-              File fpr = new File(connJ.config.logdir+"\\\\"+driver.driver+".perf.txt")
+              File fpr = new File(connJ.config.logdir + File.separator + driver.driver+".perf.txt")
               fpr.append(perfResults)
             }
             //avgTime = new TimeDuration(0,0,0,(int)(totalTime.toMilliseconds()/runs)) //Highlight properly/
             //println "Total Time: ${totalTime.toMilliseconds()} ms Runs: ${runs} Average Time: ${avgTime.toMilliseconds()} ms ($avgTime)"
         } else if(sql != null && (commandA[0] == "show" && commandA[1] == "tables")) {
             showTables(sql)
+        } else if(sql != null && (commandA[0] == "write" && commandA[1] == "metadata")) {
+	  writeMetaData(sql)
         } else if(sql !=null && commandA[0].startsWith("desc")) {
             showColumns(sql, commandC[1])
         } else if(sql !=null && commandA[0].startsWith("show") && commandA[1].startsWith("meta")) {
@@ -388,7 +448,7 @@ static main(String[] args) {
           showDataBases(connJ)
         } else if(commandA[0] == "use") {
           driver = connJ.connections.find {k -> k.name == commandA[1];}
-          def jarlocation = "J7"
+          def jarlocation = "local"
           if(commandA.size() > 2 && commandA[2] != null) jarlocation = commandA[2]
           if(driver != null) {
               sql = getSQLInstance(driver, connJ, this.getClass().classLoader, true, jarlocation)
@@ -439,8 +499,7 @@ static main(String[] args) {
     }
   }
   
-  
-  int timeoutSecs = 600
+  int timeoutSecs = 3000
   int timeElapsed = 0
   while(timeElapsed < timeoutSecs) {
     Thread.sleep(1000)
@@ -448,7 +507,6 @@ static main(String[] args) {
   }
   if( sql != null ) sql.close()
   println "\nExiting due to no activity for $timeElapsed seconds."
-
 }
 
 
