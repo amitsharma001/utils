@@ -68,7 +68,7 @@ class ConsolePrompt {
                     } else if(connManager.hasValidConnection() && (commandA[0] == "show" && commandA[1] == "tables")) {
                         new MetaDataHelper(connManager.getSQL()).showTables();
                     } else if(connManager.hasValidConnection() && (commandA[0] == "write" && commandA[1] == "metadata")) {
-                        new MetaDataHelper(connManager.getSQL()).writeMetaData();
+                        new MetaDataHelper(connManager.getSQL()).writeMetaDataToFile();
                     } else if(connManager.hasValidConnection() && commandA[0].startsWith("desc")) {
                         new MetaDataHelper(connManager.getSQL()).showColumns(commandC[1]);
                     } else if(connManager.hasValidConnection() && commandA[0].startsWith("show") && commandA[1].startsWith("meta")) {
@@ -107,6 +107,7 @@ class ConsolePrompt {
                         println "describe [table];       Lists the columns in the table.";
                         println "start batch;            Start a batch command to insert/update/delete.";
                         println "performance;            Start a performance test.";
+                        println "write metadata;         Write metadata in CSV files Tables.csv and Columns.csv.";
                         println "help;                   This help.";
                         println "config {name} {value}   Change a config setting read from the connections.json.";
                         println "exit;                   Exits this program.";
@@ -121,7 +122,7 @@ class ConsolePrompt {
                     }
                 } catch(Exception ex) {
                     println "Error: ${ex.getMessage()}";
-                    ex.printStackTrace()
+                    //ex.printStackTrace();
                     println ""
                 }
                 command = null;
@@ -134,7 +135,7 @@ class ConsolePrompt {
             Thread.sleep(1000);
             timeElapsed = idleSeconds.addAndGet(1);
         }
-        connManager.closeConection();
+        connManager.closeConnection();
         println "\nExiting due to no activity for $timeElapsed seconds.";
     }
 }

@@ -100,15 +100,15 @@ public class ResultSetHelper {
     public void writeResultSetToFile(String filename,List columns) {
         File resultFile = new File(filename);
         String headers = "";
-        if(!f.exists()) headers = columns.join(", ")   ;
+        if(!resultFile.exists()) headers = columns.join(", ")   ;
 
         resultFile.withWriterAppend { writer ->
             if (headers != "") writer.writeLine(headers);
-            while(resultSet.next()) {
+            while(results.next()) {
                 String rowvalues = "";
                 boolean first = true;
                 for(column in columns) {
-                    String value = resultSet.getString(column);
+                    String value = results.getString(column);
                     if (first) first = false;
                     else rowvalues += ", ";
                     rowvalues += value;

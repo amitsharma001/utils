@@ -67,7 +67,7 @@ class MetaDataHelper {
         def meta = sql.connection.metaData;
         def tables = meta.getTables(null, null,'%', null);
         def tableColumns = ["TABLE_CAT","TABLE_SCHEM","TABLE_NAME"];
-        writeResultSetToFile(tables,"Tables.csv","Metadata",tableColumns);
+        new ResultSetHelper(tables).writeResultSetToFile("Tables.csv",tableColumns);
         printf("Written Tables.csv, now writing column information.\n");
         tables = meta.getTables(null, null,'%', null);
         while(tables.next()) {
@@ -75,7 +75,7 @@ class MetaDataHelper {
             try {
                 def cols = meta.getColumns(null, null, table, null);
                 tableColumns = ["TABLE_NAME","COLUMN_NAME","DATA_TYPE","TYPE_NAME","COLUMN_SIZE"];
-                writeResultSetToFile(cols,"Columns.csv",table,tableColumns);
+                new ResultSetHelper(cols).writeResultSetToFile("Columns.csv",tableColumns);
                 printf("Written columns for %s\n",table);
             } catch(Exception e) {
                 printf("Could not get metadata for %s due to error: %s\n",table,e.Message)
