@@ -45,19 +45,24 @@ class MetaDataHelper {
             def table = tables.getObject("Table_Name").toString();
             try {
                 count++;
+                printf("\n\n%d) %s\n",count,table);
                 def cols = meta.getColumns(null, null, table, null);
                 def cquery = "SELECT count(*) as CNT from ["+table+"]";
-                def rows = sql.rows(cquery)["CNT"][0];
-                printf("\n\n%d) %s: %d rows\n Columns: ",count,table, rows);
+                sql.query(cquery) { resultSet ->  
+                    new ResultSetHelper(resultSet).showResults();
+                } 
+                //def rows = sql.rows(cquery)["CNT"][0];
+                //printf("%d rows\n Columns: ",rows);
+                printf("Columns: ",rows);
                 while(cols.next()) {
                     printf("%s (%s), ",cols.getObject("Column_Name").toString(), cols.getObject("Type_Name").toString());
                 }
-                if(count % 10 == 0) {
-                    print "\n\nDo you want to see more tables [Y/N]? ";
-                    if(System.console().readLine().toLowerCase() == 'n') break;
-                }
             } catch (Exception e){
                 printf("Could not get metadata for table %s\n",table);
+            }
+            if(count % 10 == 0) {
+                print "\n\nDo you want to see more tables [Y/N]? ";
+                if(System.console().readLine().toLowerCase() == 'n') break;
             }
         }
         println "\n";

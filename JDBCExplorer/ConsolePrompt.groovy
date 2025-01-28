@@ -1,3 +1,4 @@
+#!/usr/bin/env groovy
 package JDBCExplorer;
 import java.util.concurrent.atomic.AtomicInteger;
 import groovy.cli.commons.CliBuilder
@@ -71,10 +72,10 @@ class ConsolePrompt {
                         new MetaDataHelper(connManager.getSQL()).writeMetaDataToFile();
                     } else if(connManager.hasValidConnection() && commandA[0].startsWith("desc")) {
                         new MetaDataHelper(connManager.getSQL()).showColumns(commandC[1]);
-                    } else if(connManager.hasValidConnection() && commandA[0].startsWith("show") && commandA[1].startsWith("meta")) {
+                    } else if(connManager.hasValidConnection() && commandA[0].startsWith("show") && commandA[1].startsWith("tablestats")) {
                         def tablePattern = '%'
                             if( commandA.size() > 2) tablePattern = commandA[2]
-                                new MetaDataHelper(connManager.getSQL()).showMetadata(tablePattern);
+                                new MetaDataHelper(connManager.getSQL()).showTableStats(tablePattern);
                     } else if(connManager.hasValidConnection() && commandA[0].startsWith("keys")) {
                         new MetaDataHelper(connManager.getSQL()).showKeys(commandA[1]);
                     } else if(connManager.hasValidConnection() && commandA[0].startsWith("fkeys")) {
@@ -105,6 +106,7 @@ class ConsolePrompt {
                         println "keys [table];           Lists the primary keys in the table.";
                         println "fkeys [table];          Lists the foreign keys in the table.";
                         println "describe [table];       Lists the columns in the table.";
+                        println "show tablestats;        Show the row count and column names for each table.";
                         println "start batch;            Start a batch command to insert/update/delete.";
                         println "performance;            Start a performance test.";
                         println "write metadata;         Write metadata in CSV files Tables.csv and Columns.csv.";
