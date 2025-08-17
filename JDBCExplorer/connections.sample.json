@@ -1,0 +1,39 @@
+{
+	"config": {
+		"logdir": "/path/to/logs",
+		"libdir": "/path/to/lib",
+		"verbosity": "3",
+		"pagesize": "100",
+		"showkeys": false,
+		"cacheConnection": "",
+		"cachedriver": "org.postgresql.Driver",
+		"cachejar": "postgresql.jar"
+	},
+	"connections": [
+		{
+			"name": "salesforce",
+			"connection": "jdbc:salesforce:CredentialsLocation='';InitiateOAuth=GETANDREFRESH;OAuthSettingsLocation='/path/to/OAuth/Salesforce/OAuthSettings.txt';",
+			"driver": "cdata.jdbc.salesforce.SalesforceDriver"
+		},
+		{
+			"name": "jira",
+			"connection": "jdbc:jira:URL=https://your-domain.atlassian.net;InitiateOAuth=GETANDREFRESH;OAuthSettingsLocation=/path/to/OAuth/JIRA/OAuthSettings.txt",
+			"driver": "cdata.jdbc.jira.JIRADriver"
+		},
+		{
+			"name": "snowflake",
+			"connection": "jdbc:snowflake:Url=https://your-account.snowflakecomputing.com;User=your_user;Account=your_account;Password=your_password;Warehouse=your_warehouse;Database=your_database;Schema=your_schema;Timeout=0",
+			"driver": "cdata.jdbc.snowflake.SnowflakeDriver"
+		},
+		{
+			"name": "bigquery",
+			"connection": "jdbc:googlebigquery:projectid=your_project_id;datasetid=your_dataset_id;InitiateOAuth=GETANDREFRESH;Timeout=0",
+			"driver": "cdata.jdbc.googlebigquery.GoogleBigQueryDriver"
+		},
+		{
+			"name": "netsuite",
+			"connection": "jdbc:netsuite:AuthScheme=Token;Schema=SuiteQL;IncludeCustomFieldColumns=true;RowScanDepth=100;AccountID=your_account_id;RoleId=your_role_id;OAuthClientId=your_client_id;OAuthClientSecret=your_client_secret;OAuthAccessToken=your_access_token;OAuthAccessTokenSecret=your_access_token_secret",
+			"driver": "cdata.jdbc.netsuite.NetSuiteDriver"
+		}
+	]
+}

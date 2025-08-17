@@ -41,6 +41,7 @@ set hlsearch
 " No sound on errors.
 set noerrorbells
 set novisualbell
+set belloff=all
 
 " Show matching brackets and how many tenths of a second to blink
 set showmatch
