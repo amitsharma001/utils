@@ -11,12 +11,13 @@ import pandas as pd
 
 
 class SQLCommand:
-    def __init__(self, connection, query: str, page_size: int = 100):
+    def __init__(self, connection, query: str, page_size: int = 100, connection_manager=None):
         """Initialize SQL command with connection, query, and page size."""
         self.connection = connection
         self.query = query
         self.page_size = page_size
         self.params = {}
+        self.connection_manager = connection_manager
     
     def get_params_from_console(self):
         """Get parameter values from console input for parameterized queries."""
@@ -45,8 +46,13 @@ class SQLCommand:
             # Replace parameters in query
             final_query = self.replace_params_in_query(self.query, self.params)
             
-            # Execute query and get results as DataFrame
-            df = pd.read_sql(final_query, self.connection)
+            # Execute query and get results as DataFrame manually to avoid pandas warning
+            cursor = self.connection.cursor()
+            cursor.execute(final_query)
+            results = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            df = pd.DataFrame(results, columns=columns)
+            cursor.close()
             
             # Display results using ResultSetHelper
             from result_set_helper import ResultSetHelper
@@ -58,6 +64,9 @@ class SQLCommand:
             
         except Exception as e:
             print(f"Error executing query: {e}")
+            if self.connection_manager and self.connection_manager.is_debug_enabled():
+                import traceback
+                traceback.print_exc()
     
     def run_command(self, is_insert: bool = False):
         """Execute INSERT, UPDATE, DELETE, or other non-SELECT commands."""
@@ -89,6 +98,9 @@ class SQLCommand:
             
         except Exception as e:
             print(f"Error executing command: {e}")
+            if self.connection_manager and self.connection_manager.is_debug_enabled():
+                import traceback
+                traceback.print_exc()
             self.connection.rollback()
     
     def run_batch(self):
@@ -116,6 +128,9 @@ class SQLCommand:
             
         except Exception as e:
             print(f"Error in batch execution: {e}")
+            if self.connection_manager and self.connection_manager.is_debug_enabled():
+                import traceback
+                traceback.print_exc()
             self.connection.rollback()
         finally:
             cursor.close()

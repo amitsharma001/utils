@@ -43,8 +43,14 @@ class PerformanceTest:
         print(f"\n*** Starting Run {run_num} Thread {tid} ***")
         
         try:
-            # Execute query and process results
-            df = pd.read_sql(self.query, self.conn_manager.get_connection())
+            # Execute query and process results manually to avoid pandas warning
+            connection = self.conn_manager.get_connection()
+            cursor = connection.cursor()
+            cursor.execute(self.query)
+            results = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            df = pd.DataFrame(results, columns=columns)
+            cursor.close()
             
             cols = len(df.columns)
             rows = len(df)
@@ -69,6 +75,9 @@ class PerformanceTest:
             
         except Exception as ex:
             print(f"Thread: {tid} Error at row {rows}: {ex}")
+            if self.conn_manager.is_debug_enabled():
+                import traceback
+                traceback.print_exc()
             return {
                 'runtime': 0,
                 'rows': rows,

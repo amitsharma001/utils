@@ -89,7 +89,7 @@ class ResultSetHelper:
         start_row = 0
         
         while start_row < total_rows:
-            end_row = min(start_row + page_size, total_rows)
+            end_row = min(start_row + int(page_size), total_rows)
             page_df = display_df.iloc[start_row:end_row]
             
             # Display the page

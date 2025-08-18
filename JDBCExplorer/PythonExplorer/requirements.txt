@@ -1,4 +1,4 @@
-cdata-salesforce==23.0.0
+cdata-salesforce==25.0.0
 cdata-jira==23.0.0
 cdata-snowflake==23.0.0
 cdata-googlebigquery==23.0.0

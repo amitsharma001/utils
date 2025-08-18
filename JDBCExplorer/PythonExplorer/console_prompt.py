@@ -78,21 +78,21 @@ class ConsolePrompt:
             if (self.conn_manager.has_valid_connection() and 
                 command_parts[0] == "select"):
                 cmd = SQLCommand(self.conn_manager.get_connection(), command, 
-                               self.conn_manager.config.get('pagesize', 100))
+                               self.conn_manager.config.get('pagesize', 100), self.conn_manager)
                 cmd.run_select()
             
             # INSERT, UPDATE, DELETE, CACHE, REPLICATE commands
             elif (self.conn_manager.has_valid_connection() and 
                   command_parts[0] in ["insert", "update", "delete", "cache", "replicate"]):
                 cmd = SQLCommand(self.conn_manager.get_connection(), command, 
-                               self.conn_manager.config.get('pagesize', 100))
+                               self.conn_manager.config.get('pagesize', 100), self.conn_manager)
                 cmd.run_command(is_insert=(command_parts[0] == "insert"))
             
             # Batch commands
             elif (self.conn_manager.has_valid_connection() and 
                   len(command_parts) >= 2 and command_parts[0] == "start" and command_parts[1] == "batch"):
                 cmd = SQLCommand(self.conn_manager.get_connection(), command, 
-                               self.conn_manager.config.get('pagesize', 100))
+                               self.conn_manager.config.get('pagesize', 100), self.conn_manager)
                 cmd.run_batch()
             
             # Performance testing
@@ -113,17 +113,17 @@ class ConsolePrompt:
             # Show tables
             elif (self.conn_manager.has_valid_connection() and 
                   len(command_parts) >= 2 and command_parts[0] == "show" and command_parts[1] == "tables"):
-                MetaDataHelper(self.conn_manager.get_connection()).show_tables()
+                MetaDataHelper(self.conn_manager.get_connection(), self.conn_manager).show_tables()
             
             # Write metadata
             elif (self.conn_manager.has_valid_connection() and 
                   len(command_parts) >= 2 and command_parts[0] == "write" and command_parts[1] == "metadata"):
-                MetaDataHelper(self.conn_manager.get_connection()).write_metadata_to_file()
+                MetaDataHelper(self.conn_manager.get_connection(), self.conn_manager).write_metadata_to_file()
             
             # Describe table
             elif (self.conn_manager.has_valid_connection() and 
                   command_parts[0].startswith("desc") and len(command_original) > 1):
-                MetaDataHelper(self.conn_manager.get_connection()).show_columns(command_original[1])
+                MetaDataHelper(self.conn_manager.get_connection(), self.conn_manager).show_columns(command_original[1])
             
             # Show table stats
             elif (self.conn_manager.has_valid_connection() and 
@@ -131,17 +131,17 @@ class ConsolePrompt:
                 table_pattern = '%'
                 if len(command_parts) > 2:
                     table_pattern = command_parts[2]
-                MetaDataHelper(self.conn_manager.get_connection()).show_table_stats(table_pattern)
+                MetaDataHelper(self.conn_manager.get_connection(), self.conn_manager).show_table_stats(table_pattern)
             
             # Show keys
             elif (self.conn_manager.has_valid_connection() and 
                   command_parts[0].startswith("keys") and len(command_original) > 1):
-                MetaDataHelper(self.conn_manager.get_connection()).show_keys(command_original[1])
+                MetaDataHelper(self.conn_manager.get_connection(), self.conn_manager).show_keys(command_original[1])
             
             # Show foreign keys
             elif (self.conn_manager.has_valid_connection() and 
                   command_parts[0].startswith("fkeys") and len(command_original) > 1):
-                MetaDataHelper(self.conn_manager.get_connection()).show_imported_keys(command_original[1])
+                MetaDataHelper(self.conn_manager.get_connection(), self.conn_manager).show_imported_keys(command_original[1])
             
             # Show databases
             elif len(command_parts) >= 2 and command_parts[0] == "show" and command_parts[1] == "databases":

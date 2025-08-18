@@ -132,8 +132,15 @@ class ConnectionManager:
             
         except Exception as e:
             print(f"Error connecting to {connection_name}: {e}")
+            if self.is_debug_enabled():
+                import traceback
+                traceback.print_exc()
             self.connection = None
             return False
+    
+    def is_debug_enabled(self) -> bool:
+        """Check if debug mode is enabled in the configuration."""
+        return self.config.get('debug', False)
     
     def show_database_info(self, connection=None) -> str:
         """Show database connection information."""
