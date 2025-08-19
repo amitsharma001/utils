@@ -58,7 +58,7 @@ class PerformanceTest:
                     break
                 rows += 1  
                 # Report progress at intervals
-                if rows % self.row_interval == 0:
+                if rows % self.row_interval == 0 or rows == 1:
                     last_interval_time = self.write_interval_information(rows, tid, time_start, last_interval_time)
             
             cursor.close()
