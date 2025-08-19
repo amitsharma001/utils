@@ -43,22 +43,25 @@ class PerformanceTest:
         print(f"\n*** Starting Run {run_num} Thread {tid} ***")
         
         try:
-            # Execute query and process results manually to avoid pandas warning
+            # Execute query and iterate through cursor for real-time progress reporting
             connection = self.conn_manager.get_connection()
             cursor = connection.cursor()
             cursor.execute(self.query)
-            results = cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description]
-            df = pd.DataFrame(results, columns=columns)
+            
+            # Get column count from cursor description
+            cols = len(cursor.description)
+            
+            # Iterate through results and report progress
+            while True:
+                row = cursor.fetchone()
+                if row is None:
+                    break
+                rows += 1  
+                # Report progress at intervals
+                if rows % self.row_interval == 0:
+                    last_interval_time = self.write_interval_information(rows, tid, time_start, last_interval_time)
+            
             cursor.close()
-            
-            cols = len(df.columns)
-            rows = len(df)
-            
-            # Process rows in chunks for progress reporting
-            for i in range(0, rows, self.row_interval):
-                chunk_end = min(i + self.row_interval, rows)
-                last_interval_time = self.write_interval_information(chunk_end, tid, time_start, last_interval_time)
             
             # Final interval report
             last_interval_time = self.write_interval_information(rows, tid, time_start, last_interval_time)
