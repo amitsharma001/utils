@@ -152,7 +152,28 @@ class ConnectionManager:
         
         info = f"Name      : {connection['name']}\n"
         info += f"Connection: {connection['connection']}\n"
-        info += f"Driver    : {connection['driver']}\n"
+        
+        # Get product and version information from sys_information table
+        if self.connection:
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute("SELECT Product, Version FROM sys_information")
+                result = cursor.fetchone()
+                cursor.close()
+                
+                if result:
+                    product, version = result
+                    info += f"Product   : {product}\n"
+                    info += f"Version   : {version}\n"
+                else:
+                    info += f"Driver    : {connection['driver']}\n"
+            except Exception as e:
+                # Fallback to driver info if sys_information query fails
+                info += f"Driver    : {connection['driver']}\n"
+                if self.is_debug_enabled():
+                    print(f"Warning: Could not query sys_information table: {e}")
+        else:
+            info += f"Driver    : {connection['driver']}\n"
         
         if self.connection:
             info += f"Status    : Connected\n"
