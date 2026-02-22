@@ -52,18 +52,18 @@ def display_day_schedule(d: date, day_events: list, day_slots: list) -> list:
     Recurring events appear as numbered overridable slots marked with ~name~.
     Returns available_slots in display order: (start, end, hours, is_overridable, event).
     """
-    print(f"\n{'='*56}")
+    print(f"\n{'='*80}")
     print(f"  {format_day(d)}")
-    print(f"{'='*56}")
+    print(f"{'='*80}")
 
     has_overridable = any(s[3] for s in day_slots)
     if has_overridable:
         print(f"  (~ = recurring meeting, can be overridden)")
 
-    # Only show non-recurring events as blocked time; recurring ones appear as numbered slots
+    # Only show non-recurring events before 6 PM as blocked time; recurring appear as numbered slots
     items = []
     for event in day_events:
-        if not event.is_recurring:
+        if not event.is_recurring and event.start.hour < 18:
             items.append(("event", event.start, event.end, event))
     for slot in day_slots:
         s, e, h, is_ov, ev = slot
@@ -75,7 +75,7 @@ def display_day_schedule(d: date, day_events: list, day_slots: list) -> list:
     for item in items:
         if item[0] == "event":
             _, start, end, event = item
-            label = event.subject if len(event.subject) <= 42 else event.subject[:39] + "..."
+            label = event.subject if len(event.subject) <= 52 else event.subject[:49] + "..."
             print(f"  {format_time(start):<10} {format_time(end):<10}  {label}")
         else:
             _, start, end, h, is_ov, ev = item
@@ -83,10 +83,12 @@ def display_day_schedule(d: date, day_events: list, day_slots: list) -> list:
             hours_display = f"{h:.1f}h" if h != int(h) else f"{h:.0f}h"
             if is_ov:
                 subj = ev.subject if ev else ""
-                label = subj if len(subj) <= 32 else subj[:29] + "..."
-                print(f"  {format_time(start):<10} {format_time(end):<10}  [{slot_num}] {hours_display} ~{label}~")
+                label = subj if len(subj) <= 28 else subj[:25] + "..."
+                organizer = ev.organizer_name if ev else ""
+                org_str = f"  ({organizer})" if organizer else ""
+                print(f"  {format_time(start):<10} {format_time(end):<10}  [{slot_num}] {hours_display:<4} ~{label}~{org_str}")
             else:
-                print(f"  {format_time(start):<10} {format_time(end):<10}  [{slot_num}] {hours_display} free")
+                print(f"  {format_time(start):<10} {format_time(end):<10}  [{slot_num}] {hours_display:<4} free")
             available_slots.append((start, end, h, is_ov, ev))
 
     return available_slots
@@ -139,82 +141,81 @@ def main():
     hours_per_day: Dict[date, float] = {}
     total_hours_selected = 0.0
 
-    for d in sorted(events_by_date.keys()):
-        if d < start_date:
-            continue
-        if total_hours_selected >= total_hours_needed and len(hours_per_day) >= min_days_required:
-            print(f"\nGoal reached: {total_hours_selected:.0f}h across {len(hours_per_day)} days.")
-            break
-
-        day_events = events_by_date[d]
-        day_slots = finder.get_available_slots_for_day(d, day_events)
-
-        if not day_slots:
-            continue  # fully booked day, skip silently
-
-        available = display_day_schedule(d, day_events, day_slots)
-
-        progress = (
-            f"{total_hours_selected:.1f}/{total_hours_needed}h"
-            f" | {len(hours_per_day)}/{min_days_required} days"
-            f" | max {max_hours_per_day}h today"
-        )
-        print(f"\n  Progress: {progress}")
-        user_input = input(
-            "  Select slots (e.g. '1', '1 2', Enter to skip, 'done' to finish): "
-        ).strip()
-
-        if user_input.lower() in ("done", "d"):
-            print("Done.")
-            break
-        if not user_input:
-            continue
-
-        selected = parse_selection(user_input, len(available))
-        if not selected:
-            print("  No valid slot numbers entered.")
-            continue
-
-        # Merge contiguous selected slots before applying constraints
-        raw_selected = [available[idx] for idx in selected]
-        merged_selected = merge_contiguous(raw_selected)
-
-        day_added = 0.0
-        for s, e, h, overrides in merged_selected:
-            if hours_per_day.get(d, 0.0) + day_added + h > max_hours_per_day:
-                print(f"  {format_time(s)}-{format_time(e)} skipped — would exceed {max_hours_per_day}h daily limit.")
+    try:
+        for d in sorted(events_by_date.keys()):
+            if d < start_date:
                 continue
-            confirmed_slots.append((d, s, e, h, overrides))
-            day_added += h
-            total_hours_selected += h
+            if total_hours_selected >= total_hours_needed and len(hours_per_day) >= min_days_required:
+                print(f"\nGoal reached: {total_hours_selected:.0f}h across {len(hours_per_day)} days.")
+                break
 
-        if day_added > 0:
-            hours_per_day[d] = hours_per_day.get(d, 0.0) + day_added
-            print(
-                f"  Added {day_added:.1f}h"
-                f" ({hours_per_day[d]:.1f}h total for {d.strftime('%A')})"
+            day_events = events_by_date[d]
+            day_slots = finder.get_available_slots_for_day(d, day_events)
+
+            if not day_slots:
+                continue  # fully booked day, skip silently
+
+            available = display_day_schedule(d, day_events, day_slots)
+
+            progress = (
+                f"{total_hours_selected:.1f}/{total_hours_needed}h"
+                f" | {len(hours_per_day)}/{min_days_required} days"
+                f" | max {max_hours_per_day}h today"
             )
+            print(f"\n  Progress: {progress}")
+            user_input = input(
+                "  Select slots (e.g. '1', '1 2', Enter to skip, 'done'/Ctrl+C to finish): "
+            ).strip()
+
+            if user_input.lower() in ("done", "d", "q", "quit"):
+                break
+            if not user_input:
+                continue
+
+            selected = parse_selection(user_input, len(available))
+            if not selected:
+                print("  No valid slot numbers entered.")
+                continue
+
+            # Merge contiguous selected slots before applying constraints
+            raw_selected = [available[idx] for idx in selected]
+            merged_selected = merge_contiguous(raw_selected)
+
+            day_added = 0.0
+            for s, e, h, overrides in merged_selected:
+                if hours_per_day.get(d, 0.0) + day_added + h > max_hours_per_day:
+                    print(f"  {format_time(s)}-{format_time(e)} skipped — would exceed {max_hours_per_day}h daily limit.")
+                    continue
+                confirmed_slots.append((d, s, e, h, overrides))
+                day_added += h
+                total_hours_selected += h
+
+            if day_added > 0:
+                hours_per_day[d] = hours_per_day.get(d, 0.0) + day_added
+                print(
+                    f"  Added {day_added:.1f}h"
+                    f" ({hours_per_day[d]:.1f}h total for {d.strftime('%A')})"
+                )
+
+    except KeyboardInterrupt:
+        print()  # newline after ^C
 
     # Final summary
+    tz_label = config.get("timezone", "")
     if confirmed_slots:
-        print(f"\n{'='*56}")
+        print(f"\n{'='*80}")
         print(f"  Final Selection — {total_hours_selected:.0f}h across {len(hours_per_day)} day(s)")
-        print(f"{'='*56}")
+        print(f"{'='*80}")
         by_date: Dict[date, list] = defaultdict(list)
         for d, s, e, h, overrides in confirmed_slots:
             by_date[d].append((s, e, h, overrides))
         for d in sorted(by_date):
             day_label = f"{d.strftime('%A')} ({d.strftime('%-m/%-d')})"
             slot_strs = []
+            tz_suffix = f" {tz_label}" if tz_label else ""
             for s, e, h, overrides in by_date[d]:
-                time_str = f"{format_time(s)} - {format_time(e)}"
-                if overrides:
-                    ovr = ", ".join(overrides[:2])
-                    if len(overrides) > 2:
-                        ovr += f", +{len(overrides) - 2} more"
-                    time_str += f"  (~override: {ovr}~)"
-                slot_strs.append(time_str)
-            print(f"  {day_label}: {', '.join(slot_strs)}  ({hours_per_day[d]:.0f}h)")
+                slot_strs.append(f"{format_time(s)} - {format_time(e)}{tz_suffix}")
+            print(f"  {day_label}: {', '.join(slot_strs)}")
     else:
         print("\nNo slots selected.")
 
