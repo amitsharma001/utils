@@ -5,10 +5,10 @@ from calendar_event import CalendarEvent
 from calendar_data_access import CalendarDataAccess
 
 
-# A gap in the schedule: (start_datetime, end_datetime, duration_hours)
-AvailableSlot = Tuple[datetime, datetime, float]
-# A dated slot: (date, start_datetime, end_datetime, duration_hours)
-DatedSlot = Tuple[date, datetime, datetime, float]
+# A slot: (start, end, duration_hours, is_overridable, recurring_event_or_None)
+AvailableSlot = Tuple[datetime, datetime, float, bool, Optional["CalendarEvent"]]
+# A dated slot: (date, start, end, duration_hours, is_overridable, recurring_event_or_None)
+DatedSlot = Tuple[date, datetime, datetime, float, bool, Optional["CalendarEvent"]]
 
 
 class AvailabilityFinder:
@@ -56,41 +56,73 @@ class AvailabilityFinder:
     def get_available_slots_for_day(
         self, target_date: date, events: List[CalendarEvent]
     ) -> List[AvailableSlot]:
-        """Return free gaps on target_date within work hours."""
+        """Return selectable slots on target_date within work hours.
+
+        Non-recurring events block time. Recurring events become overridable slots.
+        Gaps between fixed events produce free slots; recurring events within those
+        gaps produce overridable slots.
+        """
         work_start_dt = datetime.combine(target_date, self._work_start)
         work_end_dt = datetime.combine(target_date, self._work_end)
 
-        sorted_events = sorted(
-            [e for e in events if e.start and e.end], key=lambda e: e.start
+        fixed = sorted(
+            [e for e in events if e.start and e.end and not e.is_recurring],
+            key=lambda e: e.start,
+        )
+        recurring = sorted(
+            [e for e in events if e.start and e.end and e.is_recurring],
+            key=lambda e: e.start,
         )
 
-        slots: List[AvailableSlot] = []
+        # Find available windows (time not blocked by fixed events)
+        available_windows: List[Tuple[datetime, datetime]] = []
         current = work_start_dt
-
-        for event in sorted_events:
-            if current < event.start:
-                gap_hours = (event.start - current).total_seconds() / 3600
-                if gap_hours > 0:
-                    slots.append((current, event.start, gap_hours))
-            if event.end > current:
-                current = event.end
-
-        # Gap after last event
+        for event in fixed:
+            ev_start = max(event.start, work_start_dt)
+            ev_end = min(event.end, work_end_dt)
+            if ev_start >= work_end_dt or ev_end <= work_start_dt:
+                continue
+            if current < ev_start:
+                available_windows.append((current, ev_start))
+            if ev_end > current:
+                current = ev_end
         if current < work_end_dt:
-            gap_hours = (work_end_dt - current).total_seconds() / 3600
-            if gap_hours > 0:
-                slots.append((current, work_end_dt, gap_hours))
+            available_windows.append((current, work_end_dt))
+
+        # Within each window, subdivide by recurring events
+        slots: List[AvailableSlot] = []
+        for win_start, win_end in available_windows:
+            win_recurring = sorted(
+                [e for e in recurring if e.start < win_end and e.end > win_start],
+                key=lambda e: e.start,
+            )
+            pos = win_start
+            for ev in win_recurring:
+                ev_start = max(ev.start, win_start)
+                ev_end = min(ev.end, win_end)
+                if pos < ev_start:
+                    gap_h = (ev_start - pos).total_seconds() / 3600
+                    if gap_h > 0:
+                        slots.append((pos, ev_start, gap_h, False, None))
+                if ev_end > ev_start:
+                    rec_h = (ev_end - ev_start).total_seconds() / 3600
+                    if rec_h > 0:
+                        slots.append((ev_start, ev_end, rec_h, True, ev))
+                pos = max(pos, ev_end)
+            if pos < win_end:
+                gap_h = (win_end - pos).total_seconds() / 3600
+                if gap_h > 0:
+                    slots.append((pos, win_end, gap_h, False, None))
 
         return slots
 
     def get_all_available_slots(
         self, start_date: date, weeks_ahead: int
     ) -> List[DatedSlot]:
-        """Collect all free slots from start_date across weeks_ahead weeks."""
+        """Collect all slots from start_date across weeks_ahead weeks."""
         end_date = start_date + timedelta(weeks=weeks_ahead)
         all_events = self.load_events(start_date, end_date)
 
-        # Group events by date
         events_by_date: dict = {}
         for event in all_events:
             d = event.start.date()
@@ -98,8 +130,8 @@ class AvailabilityFinder:
 
         dated_slots: List[DatedSlot] = []
         for d, day_events in sorted(events_by_date.items()):
-            for slot_start, slot_end, hours in self.get_available_slots_for_day(d, day_events):
-                dated_slots.append((d, slot_start, slot_end, hours))
+            for slot in self.get_available_slots_for_day(d, day_events):
+                dated_slots.append((d, *slot))
 
         return dated_slots
 
