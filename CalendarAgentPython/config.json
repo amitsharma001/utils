@@ -4,9 +4,17 @@
     "end": "18:00"
   },
   "availabilityHours": 6,
-  "maxHoursPerDay": 3,
-  "minDaysRequired": 3,
+  "maxHoursPerDay": 6,
+  "minDaysRequired": 2,
   "weeksToLookAhead": 16,
+  "timezone": "ET",
+  "overridableMeetings": [
+    "Daily Standup Meeting (Garrett)",
+    "Support Team Full (John Gwaltney)",
+    "Biweekly Sync up on (Pratik Goyal)",
+    "Daily Standup Meeting (Christopher)",
+    "Product & Technology (Stephen)"
+  ],
   "connectionsFile": "/Users/amits/code/utils/JDBCExplorer/connections.json",
   "exchangeConnectionName": "exchange"
 }
