@@ -93,17 +93,27 @@ class PerformanceTest:
         """Run the performance test with multiple threads and runs."""
         self.test_run_time = time.time()
         
-        with ThreadPoolExecutor(max_workers=self.threads) as executor:
-            # Submit all test runs
-            future_to_run = {
-                executor.submit(self.run_single_test, i): i 
-                for i in range(1, self.runs + 1)
-            }
-            
-            # Collect results
-            for future in as_completed(future_to_run):
-                result = future.result()
+        # Check configuration setting for single thread behavior
+        use_thread_pool = self.conn_manager.config.get('useSingleThreadPool', False)
+        
+        if self.threads == 1 and not use_thread_pool:
+            # Use current thread for single-threaded execution
+            for i in range(1, self.runs + 1):
+                result = self.run_single_test(i)
                 self.results.append(result)
+        else:
+            # Use thread pool for multi-threaded execution or when configured to do so
+            with ThreadPoolExecutor(max_workers=self.threads) as executor:
+                # Submit all test runs
+                future_to_run = {
+                    executor.submit(self.run_single_test, i): i 
+                    for i in range(1, self.runs + 1)
+                }
+                
+                # Collect results
+                for future in as_completed(future_to_run):
+                    result = future.result()
+                    self.results.append(result)
         
         self.total_runtime = time.time() - self.test_run_time
     
