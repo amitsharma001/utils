@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Interactive Calendar Availability Finder (Python version)."""
 
+from collections import defaultdict
 from datetime import date, timedelta
+from typing import Dict, List, Tuple
 
 import date_parser
 from calendar_data_access import CalendarDataAccess
@@ -16,9 +18,55 @@ def format_day(d: date) -> str:
     return d.strftime("%A (%m/%d)").replace("(0", "(")
 
 
-def main():
-    print("Finding available time slots with context...")
+def display_day_schedule(d: date, day_events: list, day_slots: list) -> list:
+    """Print the full day schedule with events and numbered free slots interleaved.
 
+    Returns a list of available (start, end, hours) in the order they were numbered.
+    """
+    print(f"\n{'='*56}")
+    print(f"  {format_day(d)}")
+    print(f"{'='*56}")
+
+    # Merge events and free slots into a single timeline sorted by start time
+    items = []
+    for event in day_events:
+        items.append(("event", event.start, event.end, event))
+    for s, e, h in day_slots:
+        items.append(("slot", s, e, h))
+    items.sort(key=lambda x: x[1])
+
+    available_slots = []
+    slot_num = 0
+    for item in items:
+        if item[0] == "event":
+            _, start, end, event = item
+            label = event.subject if len(event.subject) <= 42 else event.subject[:39] + "..."
+            print(f"  {format_time(start):<10} {format_time(end):<10}  {label}")
+        else:
+            _, start, end, h = item
+            slot_num += 1
+            hours_display = f"{h:.1f}h" if h != int(h) else f"{h:.0f}h"
+            print(f"  {format_time(start):<10} {format_time(end):<10}  [{slot_num}] {hours_display} free")
+            available_slots.append((start, end, h))
+
+    return available_slots
+
+
+def parse_selection(user_input: str, max_idx: int) -> List[int]:
+    """Parse space-separated slot numbers into 0-based indices. Deduplicates."""
+    indices, seen = [], set()
+    for token in user_input.strip().split():
+        try:
+            n = int(token)
+            if 1 <= n <= max_idx and n not in seen:
+                indices.append(n - 1)
+                seen.add(n)
+        except ValueError:
+            pass
+    return indices
+
+
+def main():
     data_access = CalendarDataAccess()
     config = data_access.config
     finder = AvailabilityFinder(data_access)
@@ -28,115 +76,96 @@ def main():
     total_hours_needed = config["availabilityHours"]
     weeks_ahead = config["weeksToLookAhead"]
 
-    # Ask for start date
-    print("\nFrom which date onwards should slots be picked?")
-    print("Examples: 'next week', '3 days', 'Nov 11', '2024-11-11' (or press Enter for tomorrow)")
-    raw_input = input("Enter start date: ").strip()
+    print(f"\nGoal: {total_hours_needed}h total, max {max_hours_per_day}h/day, across >= {min_days_required} days")
+    print("\nFrom which date should slots be picked?")
+    print("Examples: 'next week', '3 days', 'Nov 11', '2024-11-11' (or Enter for tomorrow)")
+    raw_input = input("Start date: ").strip()
     start_date = date_parser.parse_start_date(raw_input)
-    print(f"Searching for slots starting from {start_date.strftime('%A, %b %d, %Y')}")
+    print(f"Searching from {start_date.strftime('%A, %b %d, %Y')}\n")
 
-    # Load all events for context
+    # Load all events once for the entire scan window
     scan_end = start_date + timedelta(weeks=weeks_ahead)
     all_events = finder.load_events(start_date, scan_end)
-    print(f"Loaded {len(all_events)} events for analysis")
 
-    # Get all available slots
-    all_dated_slots = finder.get_all_available_slots(start_date, weeks_ahead)
+    # Group and sort events by date
+    events_by_date: Dict[date, list] = defaultdict(list)
+    for event in all_events:
+        if event.start:
+            events_by_date[event.start.date()].append(event)
+    for d in events_by_date:
+        events_by_date[d].sort(key=lambda e: e.start)
 
-    # Filter to on/after start_date (already done by get_all_available_slots, but be safe)
-    all_dated_slots = [(d, s, e, h) for d, s, e, h in all_dated_slots if d >= start_date]
-
-    if not all_dated_slots:
-        print("No available slots found in the look-ahead window.")
-        data_access.close()
-        return
-
-    print(f"\n=== Available Time Slots ===")
-    print(f"Looking for {total_hours_needed} hours spread across multiple days")
-    print(f"You can select up to {max_hours_per_day} hours per day. Once you reach {max_hours_per_day} hours for a day, remaining slots for that day will be skipped.")
-    print(f"You must select at least {min_days_required} days to meet the requirements.")
-    print()
-
-    confirmed_slots = []
-    hours_per_day: dict = {}
+    confirmed_slots: List[Tuple] = []
+    hours_per_day: Dict[date, float] = {}
     total_hours_selected = 0.0
 
-    for d, slot_start, slot_end, hours in all_dated_slots:
-        # Stop condition: enough hours AND enough days
+    for d in sorted(events_by_date.keys()):
+        if d < start_date:
+            continue
         if total_hours_selected >= total_hours_needed and len(hours_per_day) >= min_days_required:
-            print(f"Required hours ({total_hours_needed}) and minimum days ({min_days_required}) reached. Stopping.")
+            print(f"\nGoal reached: {total_hours_selected:.0f}h across {len(hours_per_day)} days.")
             break
 
-        current_day_hours = hours_per_day.get(d, 0.0)
+        day_events = events_by_date[d]
+        day_slots = finder.get_available_slots_for_day(d, day_events)
 
-        # Skip if this day is already at max
-        if current_day_hours >= max_hours_per_day:
-            day_label = format_day(d)
-            print(f"Skipping {day_label} - already selected {current_day_hours:.0f}h for this day")
+        if not day_slots:
+            continue  # fully booked day, skip silently
+
+        available = display_day_schedule(d, day_events, day_slots)
+
+        progress = (
+            f"{total_hours_selected:.1f}/{total_hours_needed}h"
+            f" | {len(hours_per_day)}/{min_days_required} days"
+            f" | max {max_hours_per_day}h today"
+        )
+        print(f"\n  Progress: {progress}")
+        user_input = input(
+            "  Select slots (e.g. '1', '1 2', Enter to skip, 'done' to finish): "
+        ).strip()
+
+        if user_input.lower() in ("done", "d"):
+            print("Done.")
+            break
+        if not user_input:
             continue
 
-        # If we have enough hours but need more days, skip days already used
-        if total_hours_selected >= total_hours_needed and len(hours_per_day) < min_days_required:
-            if d in hours_per_day:
-                day_label = format_day(d)
-                print(f"Skipping {day_label} - need more days, already used this day")
+        selected = parse_selection(user_input, len(available))
+        if not selected:
+            print("  No valid slot numbers entered.")
+            continue
+
+        day_added = 0.0
+        for idx in selected:
+            s, e, h = available[idx]
+            if hours_per_day.get(d, 0.0) + day_added + h > max_hours_per_day:
+                print(f"  [{idx + 1}] skipped — would exceed {max_hours_per_day}h daily limit.")
                 continue
+            confirmed_slots.append((d, s, e, h))
+            day_added += h
+            total_hours_selected += h
 
-        # Display the slot with context
-        day_label = format_day(d)
-        start_str = format_time(slot_start)
-        end_str = format_time(slot_end)
-        hours_display = f"{hours:.0f}h" if hours == int(hours) else f"{hours:.1f}h"
-
-        before_event, after_event = finder.get_slot_context(slot_start, slot_end, all_events)
-
-        print(f"📅 {day_label}")
-        if before_event:
-            print(f"Before:   {format_time(before_event.start)} - {format_time(before_event.end)}: {before_event.subject}")
-        else:
-            print("Before:   Free")
-
-        print(f"Proposed: {start_str} - {end_str} ({hours_display})")
-
-        if after_event:
-            print(f"After:    {format_time(after_event.start)} - {format_time(after_event.end)}: {after_event.subject}")
-        else:
-            print("After:    Free")
-
-        user_input = input("Accept this slot? (y/n/done): ").strip().lower()
-        print()
-
-        if user_input in ("done", "d"):
-            print("Done selecting slots.")
-            break
-        elif user_input in ("y", "yes"):
-            confirmed_slots.append((d, slot_start, slot_end, hours))
-            total_hours_selected += hours
-            hours_per_day[d] = current_day_hours + hours
-            day_total = hours_per_day[d]
-            print(f"Slot accepted! ({hours_display} added, {day_total:.0f}h total for {d.strftime('%A')})")
-        else:
-            print("Slot rejected.")
+        if day_added > 0:
+            hours_per_day[d] = hours_per_day.get(d, 0.0) + day_added
+            print(
+                f"  Added {day_added:.1f}h"
+                f" ({hours_per_day[d]:.1f}h total for {d.strftime('%A')})"
+            )
 
     # Final summary
     if confirmed_slots:
-        print("\n=== Final Selection ===")
-        days_used = len(hours_per_day)
-        print(f"Selected {len(confirmed_slots)} slots totaling {total_hours_selected:.0f}h across {days_used} days:")
-
-        # Group by date
-        slots_by_date: dict = {}
-        for d, slot_start, slot_end, hours in confirmed_slots:
-            slots_by_date.setdefault(d, []).append((slot_start, slot_end, hours))
-
-        for d in sorted(slots_by_date):
+        print(f"\n{'='*56}")
+        print(f"  Final Selection — {total_hours_selected:.0f}h across {len(hours_per_day)} day(s)")
+        print(f"{'='*56}")
+        by_date: Dict[date, list] = defaultdict(list)
+        for d, s, e, h in confirmed_slots:
+            by_date[d].append((s, e, h))
+        for d in sorted(by_date):
             day_label = f"{d.strftime('%A')} ({d.strftime('%-m/%-d')})"
-            day_slots = slots_by_date[d]
-            slot_strs = [f"{format_time(s)} to {format_time(e)}" for s, e, _ in day_slots]
-            day_hours = hours_per_day[d]
-            print(f"{day_label}: {' and '.join(slot_strs)} ({day_hours:.0f}h)")
+            slot_strs = [f"{format_time(s)} - {format_time(e)}" for s, e, _ in by_date[d]]
+            print(f"  {day_label}: {', '.join(slot_strs)}  ({hours_per_day[d]:.0f}h)")
     else:
-        print("\nNo slots were selected.")
+        print("\nNo slots selected.")
 
     data_access.close()
 
