@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime, time, timedelta
 from typing import List, Optional, Tuple
 
@@ -22,6 +23,42 @@ class AvailabilityFinder:
         self._work_start = time(h, m)
         h, m = map(int, work_end_str.split(":"))
         self._work_end = time(h, m)
+
+        config_free_list = self._config.get("overridableMeetings", [])
+        # Parse each entry into (title_pattern, name_pattern_or_None).
+        # Format: "Meeting Title (Person Name)" — name in parens is optional.
+        self._config_free_patterns: List[Tuple[str, Optional[str]]] = []
+        _bracket_re = re.compile(r"^(.*?)\s*\(([^)]+)\)\s*$")
+        for entry in config_free_list:
+            m = _bracket_re.match(entry.strip())
+            if m:
+                self._config_free_patterns.append((m.group(1).strip(), m.group(2).strip()))
+            else:
+                self._config_free_patterns.append((entry.strip(), None))
+
+    def _is_config_free(self, subject: str, organizer_name: str = "") -> bool:
+        """Return True if this meeting matches an overridableMeetings entry.
+
+        Each config entry is split into a title (before parens) and an optional
+        name (inside parens).  Both are matched as case-insensitive substrings
+        (equivalent to *pattern* glob) against the event subject; the name is
+        also matched against the organizer name.  Both title AND name must match
+        when a name is present.
+        """
+        if not self._config_free_patterns:
+            return False
+        subj = (subject or "").strip()
+        org = (organizer_name or "").strip()
+        for title_pat, name_pat in self._config_free_patterns:
+            if not re.search(re.escape(title_pat), subj, re.IGNORECASE):
+                continue
+            if name_pat is not None:
+                name_found = re.search(re.escape(name_pat), subj, re.IGNORECASE) or \
+                             re.search(re.escape(name_pat), org, re.IGNORECASE)
+                if not name_found:
+                    continue
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Data loading
@@ -58,21 +95,29 @@ class AvailabilityFinder:
     ) -> List[AvailableSlot]:
         """Return selectable slots on target_date within work hours.
 
-        Non-recurring events block time. Recurring events become overridable slots.
-        Gaps between fixed events produce free slots; recurring events within those
-        gaps produce overridable slots.
+        Non-recurring events block time.
+        Recurring events listed in overridableMeetings are treated as free time
+        (their window is absorbed into adjacent free slots — no user action needed).
+        All other recurring events become overridable ~slots~ the user can pick case-by-case.
         """
         work_start_dt = datetime.combine(target_date, self._work_start)
-        work_end_dt = datetime.combine(target_date, self._work_end)
+        _6pm = datetime.combine(target_date, time(18, 0))
+        work_end_dt = min(datetime.combine(target_date, self._work_end), _6pm)
 
         fixed = sorted(
             [e for e in events if e.start and e.end and not e.is_recurring],
             key=lambda e: e.start,
         )
+        # Recurring events NOT in the config-free list → shown as user-selectable ~ slots
         recurring = sorted(
-            [e for e in events if e.start and e.end and e.is_recurring],
+            [
+                e for e in events
+                if e.start and e.end and e.is_recurring
+                and not self._is_config_free(e.subject or "", e.organizer_name or "")
+            ],
             key=lambda e: e.start,
         )
+        # Config-free recurring events are simply omitted — their time becomes free windows
 
         # Find available windows (time not blocked by fixed events)
         available_windows: List[Tuple[datetime, datetime]] = []
