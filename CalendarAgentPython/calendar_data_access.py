@@ -14,7 +14,7 @@ class CalendarDataAccess:
 
         # Add PythonExplorer to path so ConnectionManager can be imported
         python_explorer_path = os.path.join(
-            os.path.dirname(__file__), "..", "JDBCExplorer", "PythonExplorer"
+            os.path.dirname(__file__), "..", "PythonExplorer"
         )
         python_explorer_path = os.path.abspath(python_explorer_path)
         if python_explorer_path not in sys.path:

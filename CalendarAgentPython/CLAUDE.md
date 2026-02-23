@@ -25,7 +25,7 @@ python test_exchange.py
 ## Configuration
 
 `config.json` (not git-ignored here) contains:
-- `connectionsFile` — **absolute path** to `JDBCExplorer/connections.json` (git-ignored, holds credentials)
+- `connectionsFile` — **absolute path** to `connections.json` at repo root (git-ignored, holds credentials)
 - `exchangeConnectionName` — name of the Exchange entry in that file
 - `workHours`, `availabilityHours`, `maxHoursPerDay`, `minDaysRequired`, `weeksToLookAhead`
 
@@ -35,7 +35,7 @@ There is no LLM-based date parsing here; `date_parser.py` is purely rule-based (
 
 **Entry point:** `calendar_agent.py` — interactive loop that prompts for a start date, displays each free slot with before/after context, and collects user confirmations. Enforces `maxHoursPerDay` and `minDaysRequired` constraints.
 
-**`CalendarDataAccess`** — reads `config.json`, then **dynamically adds `../JDBCExplorer/PythonExplorer/` to `sys.path`** and imports `ConnectionManager` from there. This is the key cross-project dependency: if the repo layout changes, update `config.json`'s `connectionsFile` and the relative path in `calendar_data_access.py:17`.
+**`CalendarDataAccess`** — reads `config.json`, then **dynamically adds `../PythonExplorer/` to `sys.path`** and imports `ConnectionManager` from there. This is the key cross-project dependency: if the repo layout changes, update `config.json`'s `connectionsFile` and the relative path in `calendar_data_access.py:17`.
 
 **`AvailabilityFinder`** — queries `Calendar` table via the CData connector, gaps free time within work hours day by day, and finds the nearest events before/after each slot for context display.
 

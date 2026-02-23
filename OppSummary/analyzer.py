@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""
+Analyzer — builds the Claude prompt from collected data and calls the Claude API.
+"""
+
+import os
+from tabulate import tabulate
+
+
+class Analyzer:
+    def __init__(self, config: dict):
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY is not set. "
+                "Add 'export ANTHROPIC_API_KEY=<your-key>' to ~/.zshrc or ~/.bashrc and restart your shell."
+            )
+        import anthropic
+        self._client = anthropic.Anthropic(api_key=api_key)
+        self._model = config.get("claude_model", "claude-sonnet-4-6")
+        self._config = config
+
+    # ------------------------------------------------------------------
+    # Truncation helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _trunc(text, max_chars: int) -> str:
+        if text is None:
+            return ""
+        text = str(text)
+        if len(text) <= max_chars:
+            return text
+        cut = len(text) - max_chars
+        return text[:max_chars] + f"... [truncated {cut} chars]"
+
+    # ------------------------------------------------------------------
+    # Prompt builder
+    # ------------------------------------------------------------------
+
+    def build_prompt(self, data: dict) -> str:
+        cfg = self._config
+        opp = data["opp"]
+        lines = []
+
+        lines.append("You are a customer success analyst at CData Software. Analyze this Closed Lost opportunity.\n")
+
+        # --- Opportunity ---
+        lines.append("=== OPPORTUNITY ===")
+        lines.append(f"Name      : {opp.get('Name', '')}")
+        lines.append(f"Close Date: {opp.get('CloseDate', '')}")
+        amount = opp.get("Amount")
+        lines.append(f"Amount    : {f'${amount:,.2f}' if amount else 'N/A'}")
+        lines.append(f"Description:\n{self._trunc(opp.get('Description'), 2000)}")
+        lines.append("")
+
+        # --- Products ---
+        lines.append("=== PRODUCTS ===")
+        products = data.get("products", [])
+        if products:
+            prod_rows = [
+                [
+                    p.get("Name", ""),
+                    p.get("Product_Group__c", ""),
+                    p.get("Edition__c", ""),
+                    p.get("Application__c", ""),
+                    p.get("Quantity", ""),
+                    p.get("ACV__c", ""),
+                    p.get("NewBusiness__c", ""),
+                ]
+                for p in products
+            ]
+            lines.append(tabulate(prod_rows, headers=["Name", "Group", "Edition", "Application", "Qty", "ACV", "NewBiz"], tablefmt="simple"))
+        else:
+            lines.append("No product line items found.")
+        lines.append("")
+
+        # --- Cases ---
+        total_found = data.get("total_cases_found", 0)
+        cases = data.get("cases", [])
+        max_ep = cfg.get("max_emails_per_case", 5)
+        max_cp = cfg.get("max_comments_per_case", 5)
+
+        lines.append(f"=== SUPPORT CASES ({len(cases)} shown of {total_found} found via account-level join) ===")
+
+        # Build per-case email/comment maps
+        emails_by_case: dict[str, list] = {}
+        for em in data.get("emails", []):
+            parent = em.get("ParentId") or em.get("parentid") or ""
+            # EmailMessage.ParentId is the case Id
+            emails_by_case.setdefault(parent, []).append(em)
+
+        comments_by_case: dict[str, list] = {}
+        for cc in data.get("comments", []):
+            parent = cc.get("ParentId") or cc.get("parentid") or ""
+            comments_by_case.setdefault(parent, []).append(cc)
+
+        if cases:
+            for case in cases:
+                cid = case.get("CaseId", "")
+                lines.append(f"\n  Case {case.get('CaseNumber', '')} — {case.get('Subject', '')} [{case.get('Status', '')}]")
+                jira_ref = case.get("JIRA_Reference__c")
+                if jira_ref:
+                    lines.append(f"    Jira: {jira_ref}")
+
+                case_emails = emails_by_case.get(cid, [])[:max_ep]
+                if case_emails:
+                    lines.append("    Emails:")
+                    for em in case_emails:
+                        direction = "IN" if em.get("Incoming") else "OUT"
+                        lines.append(
+                            f"      [{em.get('MessageDate', '')}] {direction} from {em.get('FromName', '')} | "
+                            f"{em.get('Subject', '')} | {self._trunc(em.get('TextBody'), 1000)}"
+                        )
+
+                case_comments = comments_by_case.get(cid, [])[:max_cp]
+                if case_comments:
+                    lines.append("    Comments:")
+                    for cc in case_comments:
+                        vis = "Public" if cc.get("IsPublished") else "Internal"
+                        lines.append(
+                            f"      [{cc.get('CreatedDate', '')}] {vis} | {self._trunc(cc.get('CommentBody'), 500)}"
+                        )
+        else:
+            lines.append("No cases found.")
+        lines.append("")
+
+        # --- Jira ---
+        lines.append("=== JIRA ISSUES ===")
+        jira_issues = data.get("jira_issues", [])
+        max_jc = cfg.get("max_jira_comments", 20)
+
+        jira_comments_by_key: dict[str, list] = {}
+        for jc in data.get("jira_comments", []):
+            key = jc.get("IssueKey") or jc.get("issuekey") or ""
+            jira_comments_by_key.setdefault(key, []).append(jc)
+
+        if jira_issues:
+            for issue in jira_issues:
+                key = issue.get("Key", "")
+                lines.append(
+                    f"\n  {key} [{issue.get('IssueTypeName', '')}] {issue.get('StatusName', '')} / {issue.get('PriorityName', '')} — {issue.get('Summary', '')}"
+                )
+                resolution = issue.get("ResolutionName")
+                if resolution:
+                    lines.append(f"    Resolution: {resolution} on {issue.get('ResolutionDate', '')}")
+                desc = self._trunc(issue.get("Description"), 1500)
+                if desc:
+                    lines.append(f"    Description: {desc}")
+                components = issue.get("ComponentsAggregate")
+                if components:
+                    lines.append(f"    Components: {components}")
+                fix_versions = issue.get("FixVersionsAggregate")
+                if fix_versions:
+                    lines.append(f"    Fix Versions: {fix_versions}")
+
+                issue_comments = jira_comments_by_key.get(key, [])
+                all_jira_comments_count = sum(len(v) for v in jira_comments_by_key.values())
+                # Apply global max across all issues
+                shown_jira = []
+                total_so_far = 0
+                for iss in jira_issues:
+                    k = iss.get("Key", "")
+                    for jc in jira_comments_by_key.get(k, []):
+                        if total_so_far >= max_jc:
+                            break
+                        shown_jira.append((k, jc))
+                        total_so_far += 1
+
+                issue_shown = [jc for k, jc in shown_jira if k == key]
+                if issue_shown:
+                    lines.append("    Comments:")
+                    for jc in issue_shown:
+                        lines.append(
+                            f"      [{jc.get('Created', '')}] {jc.get('AuthorDisplayName', '')} | "
+                            f"{self._trunc(jc.get('Body'), 800)}"
+                        )
+        else:
+            lines.append("No Jira tickets found for this opportunity.")
+        lines.append("")
+
+        # --- Sync Trials ---
+        lines.append("=== TRIAL TELEMETRY — SYNC ===")
+        sync_trials = data.get("sync_trials", [])[: cfg.get("max_trial_rows", 10)]
+        if sync_trials:
+            sync_rows = [
+                [
+                    t.get("Serial__c", ""),
+                    t.get("Product__c", ""),
+                    t.get("DataSource__c", ""),
+                    t.get("Destination__c", ""),
+                    t.get("TrialDate__c", ""),
+                    t.get("LastQueryDate__c", ""),
+                    t.get("TotalSuccesses__c", ""),
+                    t.get("TotalFailures__c", ""),
+                    t.get("TotalRecordCount__c", ""),
+                    t.get("IsExpired__c", ""),
+                ]
+                for t in sync_trials
+            ]
+            lines.append(
+                tabulate(
+                    sync_rows,
+                    headers=["Serial", "Product", "DataSource", "Destination", "TrialDate", "LastQuery", "Successes", "Failures", "Records", "Expired"],
+                    tablefmt="simple",
+                )
+            )
+        else:
+            lines.append("No Sync trial data.")
+        lines.append("")
+
+        # --- Cloud Trials ---
+        lines.append("=== TRIAL TELEMETRY — CONNECT CLOUD ===")
+        cloud_trials = data.get("cloud_trials", [])[: cfg.get("max_trial_rows", 10)]
+        if cloud_trials:
+            cloud_rows = [
+                [
+                    t.get("Serial__c", ""),
+                    t.get("DataSource__c", ""),
+                    t.get("Destination__c", ""),
+                    t.get("TrialDate__c", ""),
+                    t.get("LastQueryDate__c", ""),
+                    t.get("TotalSuccesses__c", ""),
+                    t.get("TotalFailures__c", ""),
+                    t.get("TotalRecordCount__c", ""),
+                    t.get("IsExpired__c", ""),
+                ]
+                for t in cloud_trials
+            ]
+            lines.append(
+                tabulate(
+                    cloud_rows,
+                    headers=["Serial", "DataSource", "Destination", "TrialDate", "LastQuery", "Successes", "Failures", "Records", "Expired"],
+                    tablefmt="simple",
+                )
+            )
+        else:
+            lines.append("No Connect Cloud trial data.")
+        lines.append("")
+
+        # --- Analysis instructions ---
+        lines.append("=== ANALYSIS INSTRUCTIONS ===")
+        lines.append(
+            "Produce a structured report covering:\n"
+            "1. WHY DID WE LOSE THIS DEAL?\n"
+            "2. PRODUCT GAPS AND BUGS (specific features, connectors, unresolved issues)\n"
+            "3. ENGAGEMENT QUALITY (missed escalations, response times, what could differ)\n"
+            "4. TRIAL HEALTH (active use vs cold — cite TotalSuccesses, LastQueryDate, IsExpired)\n"
+            "5. COMPETITIVE / PRICING SIGNALS\n"
+            "6. SYSTEMIC ISSUES (bugs likely affecting other customers)\n"
+            "Use bullets, be specific, cite evidence."
+        )
+
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # API call
+    # ------------------------------------------------------------------
+
+    def analyze(self, data: dict) -> str:
+        prompt = self.build_prompt(data)
+        message = self._client.messages.create(
+            model=self._model,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return message.content[0].text

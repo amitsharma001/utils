@@ -20,7 +20,7 @@ class ConsolePrompt {
             cli.usage();
             System.exit(0);
         }
-        String cFile = 'connections.json';
+        String cFile = '../connections.json';
         if(options.f) cFile = options.f;
 
         ConnectionManager connManager = new ConnectionManager(cFile);

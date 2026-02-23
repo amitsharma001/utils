@@ -1,0 +1,13 @@
+{
+  "_comment": "Set ANTHROPIC_API_KEY env var in ~/.zshrc or ~/.bashrc before running",
+  "sf_connection": "sf",
+  "jira_connection": "jira",
+  "connections_file": "/Users/amits/code/utils/connections.json",
+  "claude_model": "claude-sonnet-4-6",
+  "closed_lost_since": "2026-01-01",
+  "max_cases_per_opp": 10,
+  "max_emails_per_case": 5,
+  "max_comments_per_case": 5,
+  "max_jira_comments": 20,
+  "max_trial_rows": 10
+}
