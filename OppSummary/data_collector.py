@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-DataCollector — fetches Salesforce and Jira data for a Closed Lost opportunity.
+DataCollector — fetches Salesforce and Jira data for an opportunity.
 """
 
 import os
 import re
 import sys
+from datetime import date, timedelta
 
 
 def _bootstrap_connection_manager():
@@ -60,6 +61,28 @@ class DataCollector:
             cursor.close()
 
     @staticmethod
+    def _quarter_bounds(offset: int = 0) -> tuple[str, str]:
+        """Return (start, end) ISO date strings for a quarter relative to today.
+        offset=0 → current quarter, offset=-1 → previous quarter, etc.
+        """
+        today = date.today()
+        q = (today.month - 1) // 3  # 0..3
+        year = today.year
+        q += offset
+        while q < 0:
+            q += 4
+            year -= 1
+        while q > 3:
+            q -= 4
+            year += 1
+        start = date(year, q * 3 + 1, 1)
+        end_month = start.month + 3
+        end_year = year if end_month <= 12 else year + 1
+        end_month = end_month if end_month <= 12 else end_month - 12
+        end = date(end_year, end_month, 1) - timedelta(days=1)
+        return start.isoformat(), end.isoformat()
+
+    @staticmethod
     def _in_clause(ids: list[str]) -> str:
         escaped = ", ".join(f"'{str(i).replace(chr(39), chr(39)*2)}'" for i in ids)
         return f"({escaped})"
@@ -84,15 +107,35 @@ class DataCollector:
     # Query methods
     # ------------------------------------------------------------------
 
-    def get_closed_lost_opps(self) -> list[dict]:
-        since = self._config["closed_lost_since"]
+    def get_open_opps_this_quarter(self) -> list[dict]:
+        """Open opps with CloseDate in current quarter, sorted by Amount DESC."""
+        start, end = self._quarter_bounds(0)
         sql = f"""
-SELECT DISTINCT o.[Id], o.[Name], o.[CloseDate], o.[Amount], o.[Description]
+SELECT DISTINCT o.[Id], o.[Name], o.[CloseDate], o.[Amount], o.[Description], o.[StageName]
 FROM [Opportunity] o
 INNER JOIN [OpportunityLineItem] oli ON oli.[OpportunityId] = o.[Id]
-WHERE o.[StageName] = 'Closed Lost'
+WHERE o.[StageName] NOT IN ('Closed Lost', 'Closed Won')
   AND oli.[Product_Group__c] IN ('Sync', 'Connect Cloud')
-  AND o.[CloseDate] >= '{since}'
+  AND o.[CloseDate] >= '{start}'
+  AND o.[CloseDate] <= '{end}'
+  AND o.[Amount] > 10000
+ORDER BY o.[Amount] DESC NULLS LAST
+"""
+        return self._execute_sf(sql.strip())
+
+    def get_closed_opps_recent_quarters(self) -> list[dict]:
+        """Closed Won + Closed Lost opps from current and previous quarter, sorted by CloseDate DESC."""
+        prev_start, _ = self._quarter_bounds(-1)
+        _, curr_end = self._quarter_bounds(0)
+        sql = f"""
+SELECT DISTINCT o.[Id], o.[Name], o.[CloseDate], o.[Amount], o.[Description], o.[StageName]
+FROM [Opportunity] o
+INNER JOIN [OpportunityLineItem] oli ON oli.[OpportunityId] = o.[Id]
+WHERE o.[StageName] IN ('Closed Lost', 'Closed Won')
+  AND oli.[Product_Group__c] IN ('Sync', 'Connect Cloud')
+  AND o.[CloseDate] >= '{prev_start}'
+  AND o.[CloseDate] <= '{curr_end}'
+  AND o.[Amount] > 10000
 ORDER BY o.[CloseDate] DESC
 """
         return self._execute_sf(sql.strip())
@@ -187,6 +230,63 @@ WHERE o.[Id] = '{opp_id}'
 ORDER BY t.[TrialDate__c] DESC
 """
         return self._execute_sf(sql.strip())
+
+    def get_preview_counts(self, opp_ids: list[str]) -> dict:
+        """Return {opp_id: {cases: N, emails: N, jira: N}} for all given opp IDs.
+
+        Uses two batch queries so cost is constant regardless of list length.
+        Silently returns zeros on any error so the listing can still be shown.
+        """
+        result = {opp_id: {"cases": 0, "emails": 0, "jira": 0} for opp_id in opp_ids}
+        if not opp_ids:
+            return result
+
+        # --- cases + jira refs (one query) ---
+        case_sql = f"""
+SELECT o.[Id] AS OppId, c.[Id] AS CaseId, c.[JIRA_Reference__c]
+FROM [Opportunity] o
+INNER JOIN [Account] a ON o.[AccountId] = a.[Id]
+INNER JOIN [Case] c    ON c.[AccountId] = a.[Id]
+WHERE o.[Id] IN {self._in_clause(opp_ids)}
+"""
+        try:
+            case_rows = self._execute_sf(case_sql.strip())
+        except Exception:
+            return result
+
+        case_to_opp: dict[str, str] = {}
+        jira_per_opp: dict[str, set] = {oid: set() for oid in opp_ids}
+        for row in case_rows:
+            oid = row["OppId"]
+            cid = row["CaseId"]
+            case_to_opp[cid] = oid
+            result[oid]["cases"] += 1
+            ref = row.get("JIRA_Reference__c")
+            if ref:
+                m = re.search(r"/([A-Z]+-\d+)(?:[/?#].*)?$", str(ref))
+                if m:
+                    jira_per_opp[oid].add(m.group(1))
+
+        for oid, keys in jira_per_opp.items():
+            result[oid]["jira"] = len(keys)
+
+        # --- email counts (one query, only ParentId — no body fetched) ---
+        all_case_ids = list(case_to_opp.keys())
+        if all_case_ids:
+            email_sql = f"""
+SELECT em.[ParentId] AS CaseId
+FROM [EmailMessage] em
+WHERE em.[ParentId] IN {self._in_clause(all_case_ids)}
+"""
+            try:
+                for row in self._execute_sf(email_sql.strip()):
+                    oid = case_to_opp.get(row["CaseId"])
+                    if oid:
+                        result[oid]["emails"] += 1
+            except Exception:
+                pass
+
+        return result
 
     # ------------------------------------------------------------------
     # Orchestrator

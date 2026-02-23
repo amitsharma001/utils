@@ -35,15 +35,31 @@ class Analyzer:
         return text[:max_chars] + f"... [truncated {cut} chars]"
 
     # ------------------------------------------------------------------
+    # Instructions template loader
+    # ------------------------------------------------------------------
+
+    def _load_instructions_template(self) -> str:
+        path = os.path.join(os.path.dirname(__file__), "analysis_instructions.md")
+        with open(path, "r") as f:
+            return f.read()
+
+    # ------------------------------------------------------------------
     # Prompt builder
     # ------------------------------------------------------------------
 
     def build_prompt(self, data: dict) -> str:
         cfg = self._config
         opp = data["opp"]
+        opp_type = data.get("opp_type", "Closed Lost")
         lines = []
 
-        lines.append("You are a customer success analyst at CData Software. Analyze this Closed Lost opportunity.\n")
+        template = self._load_instructions_template()
+        marker = "\n=== ANALYSIS INSTRUCTIONS ==="
+        intro_block, _, instructions_block = template.partition(marker)
+        intro_text = intro_block.strip().replace("{OPP_TYPE}", opp_type)
+        instructions_text = (marker + instructions_block).replace("{OPP_TYPE}", opp_type)
+
+        lines.append(intro_text + "\n")
 
         # --- Opportunity ---
         lines.append("=== OPPORTUNITY ===")
@@ -238,18 +254,8 @@ class Analyzer:
             lines.append("No Connect Cloud trial data.")
         lines.append("")
 
-        # --- Analysis instructions ---
-        lines.append("=== ANALYSIS INSTRUCTIONS ===")
-        lines.append(
-            "Produce a structured report covering:\n"
-            "1. WHY DID WE LOSE THIS DEAL?\n"
-            "2. PRODUCT GAPS AND BUGS (specific features, connectors, unresolved issues)\n"
-            "3. ENGAGEMENT QUALITY (missed escalations, response times, what could differ)\n"
-            "4. TRIAL HEALTH (active use vs cold — cite TotalSuccesses, LastQueryDate, IsExpired)\n"
-            "5. COMPETITIVE / PRICING SIGNALS\n"
-            "6. SYSTEMIC ISSUES (bugs likely affecting other customers)\n"
-            "Use bullets, be specific, cite evidence."
-        )
+        # --- Analysis instructions (loaded from analysis_instructions.md) ---
+        lines.append(instructions_text)
 
         return "\n".join(lines)
 

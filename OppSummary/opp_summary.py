@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-OppSummary — Interactive CLI for analyzing Closed Lost Salesforce opportunities.
+OppSummary — Interactive CLI for analyzing Salesforce opportunities.
 """
 
 import json
 import os
 import sys
+import termios
+import tty
 
 from tabulate import tabulate
 
@@ -16,13 +18,77 @@ def _load_config() -> dict:
         return json.load(f)
 
 
-def _display_opp_list(opps: list[dict]) -> None:
-    rows = [
-        [i + 1, o.get("Name", ""), o.get("CloseDate", ""), f"${o['Amount']:,.0f}" if o.get("Amount") else "N/A"]
-        for i, o in enumerate(opps)
-    ]
+def _read_single_key() -> str:
+    """Read one character from stdin without requiring Enter (cbreak mode)."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    return ch
+
+
+def _prompt_mode() -> str:
+    """Prompt user to choose Open or Closed mode. Returns 'open' or 'closed'."""
+    while True:
+        print("Analyze (O)pen or (C)losed opportunities? [O/C]: ", end="", flush=True)
+        ch = _read_single_key().lower()
+        print(ch)
+        if ch == "o":
+            return "open"
+        if ch == "c":
+            return "closed"
+        print("  Please press O for Open or C for Closed.")
+
+
+def _get_opp_type(opp: dict) -> str:
+    stage = opp.get("StageName", "")
+    if stage == "Closed Lost":
+        return "Closed Lost"
+    if stage == "Closed Won":
+        return "Closed Won"
+    return "Open"
+
+
+def _display_opp_list(opps: list[dict], mode: str, counts: dict | None = None) -> None:
+    def _cnt(opp_id: str, key: str) -> str:
+        if counts is None:
+            return "-"
+        return str(counts.get(opp_id, {}).get(key, 0))
+
+    if mode == "open":
+        rows = [
+            [
+                i + 1,
+                o.get("Name", ""),
+                o.get("StageName", ""),
+                o.get("CloseDate", ""),
+                f"${o['Amount']:,.0f}" if o.get("Amount") else "N/A",
+                _cnt(o["Id"], "cases"),
+                _cnt(o["Id"], "emails"),
+                _cnt(o["Id"], "jira"),
+            ]
+            for i, o in enumerate(opps)
+        ]
+        headers = ["#", "Name", "Stage", "Close Date", "Amount", "Cases", "Emails", "Jira"]
+    else:
+        rows = [
+            [
+                i + 1,
+                o.get("Name", "") + (" (Won)" if o.get("StageName") == "Closed Won" else " (Lost)"),
+                o.get("CloseDate", ""),
+                f"${o['Amount']:,.0f}" if o.get("Amount") else "N/A",
+                _cnt(o["Id"], "cases"),
+                _cnt(o["Id"], "emails"),
+                _cnt(o["Id"], "jira"),
+            ]
+            for i, o in enumerate(opps)
+        ]
+        headers = ["#", "Name", "Close Date", "Amount", "Cases", "Emails", "Jira"]
     print()
-    print(tabulate(rows, headers=["#", "Name", "Close Date", "Amount"], tablefmt="simple"))
+    print(tabulate(rows, headers=headers, tablefmt="simple"))
     print()
 
 
@@ -45,7 +111,7 @@ def _step(label: str, result_str: str) -> None:
     print(f"  {label:<30} {result_str}", flush=True)
 
 
-def _gather_and_display(opp: dict, collector, config: dict) -> dict:
+def _gather_and_display(opp: dict, collector, config: dict, mode: str) -> dict:
     print(f"\nGathering data for: {opp.get('Name', opp.get('Id', ''))}")
 
     # Products
@@ -132,6 +198,7 @@ def _gather_and_display(opp: dict, collector, config: dict) -> dict:
 
     return {
         "opp": opp,
+        "opp_type": _get_opp_type(opp),
         "products": products,
         "cases": cases,
         "total_cases_found": total_cases,
@@ -174,21 +241,37 @@ def main():
         print(f"Error initializing analyzer: {e}")
         sys.exit(1)
 
+    # Mode selection
+    mode = _prompt_mode()
+    print()
+
     # Main loop
     while True:
-        print("Fetching Closed Lost opportunities...", flush=True)
+        if mode == "open":
+            print("Fetching Open opportunities closing this quarter...", flush=True)
+            label = "this quarter"
+            fetch_fn = collector.get_open_opps_this_quarter
+        else:
+            print("Fetching Closed opportunities from current and previous quarter...", flush=True)
+            label = "current and previous quarter"
+            fetch_fn = collector.get_closed_opps_recent_quarters
+
         try:
-            opps = collector.get_closed_lost_opps()
+            opps = fetch_fn()
         except Exception as e:
             print(f"Error fetching opportunities: {e}")
             sys.exit(1)
 
         if not opps:
-            print(f"No Closed Lost Sync/Connect Cloud opportunities found since {config.get('closed_lost_since', '?')}.")
+            print(f"No {'Open' if mode == 'open' else 'Closed'} Sync/Connect Cloud opportunities found for {label}.")
             sys.exit(0)
 
-        print(f"Found {len(opps)} opportunities:")
-        _display_opp_list(opps)
+        print(f"Found {len(opps)} opportunities. Fetching preview counts...", flush=True)
+        try:
+            counts = collector.get_preview_counts([o["Id"] for o in opps])
+        except Exception:
+            counts = None
+        _display_opp_list(opps, mode, counts)
 
         choice = _prompt_opp_choice(len(opps))
         if choice is None:
@@ -198,7 +281,7 @@ def main():
         selected_opp = opps[choice]
 
         # Gather data with per-step progress
-        data = _gather_and_display(selected_opp, collector, config)
+        data = _gather_and_display(selected_opp, collector, config, mode)
 
         if data["errors"]:
             print(f"\nWarnings: {'; '.join(data['errors'])}")
@@ -217,7 +300,9 @@ def main():
             print(f"Error calling Claude: {e}")
 
         # Continue?
-        again = input("\nAnalyze another opportunity? [Y/N]: ").strip().lower()
+        print("\nAnalyze another opportunity? [Y/N]: ", end="", flush=True)
+        again = _read_single_key().lower()
+        print(again)
         if again != "y":
             print("Goodbye.")
             break
