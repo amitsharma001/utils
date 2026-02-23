@@ -124,8 +124,10 @@ class Analyzer:
                     lines.append("    Emails:")
                     for em in case_emails:
                         direction = "IN" if em.get("Incoming") else "OUT"
+                        md = em.get("MessageDate", "")
+                        md_str = md.date().isoformat() if hasattr(md, "date") else str(md)[:10]
                         lines.append(
-                            f"      [{em.get('MessageDate', '')}] {direction} from {em.get('FromName', '')} | "
+                            f"      [{md_str}] {direction} from {em.get('FromName', '')} | "
                             f"{em.get('Subject', '')} | {self._trunc(em.get('TextBody'), 1000)}"
                         )
 

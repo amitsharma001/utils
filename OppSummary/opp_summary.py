@@ -139,7 +139,8 @@ def _gather_and_display(opp: dict, collector, config: dict, mode: str) -> dict:
             emails = collector.get_case_emails(case_ids)
             _step("Emails...", f"{len(emails)} found")
             for em in emails:
-                date_str = (em.get("MessageDate") or "")[:10]
+                md = em.get("MessageDate") or ""
+                date_str = md.date().isoformat() if hasattr(md, "date") else str(md)[:10]
                 subj = em.get("Subject", "")
                 print(f"    {date_str}  {subj}", flush=True)
         except Exception as e:
