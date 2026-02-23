@@ -52,12 +52,7 @@ def _get_opp_type(opp: dict) -> str:
     return "Open"
 
 
-def _display_opp_list(opps: list[dict], mode: str, counts: dict | None = None) -> None:
-    def _cnt(opp_id: str, key: str) -> str:
-        if counts is None:
-            return "-"
-        return str(counts.get(opp_id, {}).get(key, 0))
-
+def _display_opp_list(opps: list[dict], mode: str) -> None:
     if mode == "open":
         rows = [
             [
@@ -66,13 +61,10 @@ def _display_opp_list(opps: list[dict], mode: str, counts: dict | None = None) -
                 o.get("StageName", ""),
                 o.get("CloseDate", ""),
                 f"${o['Amount']:,.0f}" if o.get("Amount") else "N/A",
-                _cnt(o["Id"], "cases"),
-                _cnt(o["Id"], "emails"),
-                _cnt(o["Id"], "jira"),
             ]
             for i, o in enumerate(opps)
         ]
-        headers = ["#", "Name", "Stage", "Close Date", "Amount", "Cases", "Emails", "Jira"]
+        headers = ["#", "Name", "Stage", "Close Date", "Amount"]
     else:
         rows = [
             [
@@ -80,13 +72,10 @@ def _display_opp_list(opps: list[dict], mode: str, counts: dict | None = None) -
                 o.get("Name", "") + (" (Won)" if o.get("StageName") == "Closed Won" else " (Lost)"),
                 o.get("CloseDate", ""),
                 f"${o['Amount']:,.0f}" if o.get("Amount") else "N/A",
-                _cnt(o["Id"], "cases"),
-                _cnt(o["Id"], "emails"),
-                _cnt(o["Id"], "jira"),
             ]
             for i, o in enumerate(opps)
         ]
-        headers = ["#", "Name", "Close Date", "Amount", "Cases", "Emails", "Jira"]
+        headers = ["#", "Name", "Close Date", "Amount"]
     print()
     print(tabulate(rows, headers=headers, tablefmt="simple"))
     print()
@@ -129,9 +118,13 @@ def _gather_and_display(opp: dict, collector, config: dict, mode: str) -> dict:
         total_cases = len(all_cases)
         cases = all_cases[:max_cases]
         if total_cases > max_cases:
-            _step("Cases...", f"OK ({total_cases} found, using top {max_cases})")
+            _step("Cases...", f"{total_cases} found, using top {max_cases}")
         else:
-            _step("Cases...", f"OK ({total_cases} found)")
+            _step("Cases...", f"{total_cases} found")
+        for c in cases:
+            num = c.get("CaseNumber", "")
+            subj = c.get("Subject", "")
+            print(f"    [#{num}] {subj}", flush=True)
     except Exception as e:
         cases = []
         total_cases = 0
@@ -144,7 +137,11 @@ def _gather_and_display(opp: dict, collector, config: dict, mode: str) -> dict:
     if case_ids:
         try:
             emails = collector.get_case_emails(case_ids)
-            _step("Emails...", f"OK ({len(emails)})")
+            _step("Emails...", f"{len(emails)} found")
+            for em in emails:
+                date_str = (em.get("MessageDate") or "")[:10]
+                subj = em.get("Subject", "")
+                print(f"    {date_str}  {subj}", flush=True)
         except Exception as e:
             _step("Emails...", f"ERROR: {e}")
     else:
@@ -184,7 +181,8 @@ def _gather_and_display(opp: dict, collector, config: dict, mode: str) -> dict:
     sync_trials = []
     try:
         sync_trials = collector.get_sync_trials(opp["Id"])
-        _step("Sync trials...", f"OK ({len(sync_trials)} rows)")
+        n = len(sync_trials)
+        _step("Sync trials...", f"Available ({n} rows)" if n > 0 else "Not available")
     except Exception as e:
         _step("Sync trials...", f"ERROR: {e}")
 
@@ -192,7 +190,8 @@ def _gather_and_display(opp: dict, collector, config: dict, mode: str) -> dict:
     cloud_trials = []
     try:
         cloud_trials = collector.get_cloud_trials(opp["Id"])
-        _step("Connect Cloud trials...", f"OK ({len(cloud_trials)} rows)")
+        n = len(cloud_trials)
+        _step("Connect Cloud trials...", f"Available ({n} rows)" if n > 0 else "Not available")
     except Exception as e:
         _step("Connect Cloud trials...", f"ERROR: {e}")
 
@@ -266,12 +265,8 @@ def main():
             print(f"No {'Open' if mode == 'open' else 'Closed'} Sync/Connect Cloud opportunities found for {label}.")
             sys.exit(0)
 
-        print(f"Found {len(opps)} opportunities. Fetching preview counts...", flush=True)
-        try:
-            counts = collector.get_preview_counts([o["Id"] for o in opps])
-        except Exception:
-            counts = None
-        _display_opp_list(opps, mode, counts)
+        print(f"Found {len(opps)} opportunities.", flush=True)
+        _display_opp_list(opps, mode)
 
         choice = _prompt_opp_choice(len(opps))
         if choice is None:
@@ -286,18 +281,24 @@ def main():
         if data["errors"]:
             print(f"\nWarnings: {'; '.join(data['errors'])}")
 
-        # Call Claude
-        print("\nCalling Claude for analysis...", flush=True)
-        banner = "=" * 70
-        try:
-            analysis = analyzer.analyze(data)
-            print(f"\n{banner}")
-            print(f"ANALYSIS: {selected_opp.get('Name', '')}")
-            print(banner)
-            print(analysis)
-            print(banner)
-        except Exception as e:
-            print(f"Error calling Claude: {e}")
+        # Confirm before calling Claude
+        print("\nRun analysis? [Y/N]: ", end="", flush=True)
+        run_it = _read_single_key().lower()
+        print(run_it)
+
+        if run_it == "y":
+            # Call Claude
+            print("\nCalling Claude for analysis...", flush=True)
+            banner = "=" * 70
+            try:
+                analysis = analyzer.analyze(data)
+                print(f"\n{banner}")
+                print(f"ANALYSIS: {selected_opp.get('Name', '')}")
+                print(banner)
+                print(analysis)
+                print(banner)
+            except Exception as e:
+                print(f"Error calling Claude: {e}")
 
         # Continue?
         print("\nAnalyze another opportunity? [Y/N]: ", end="", flush=True)
