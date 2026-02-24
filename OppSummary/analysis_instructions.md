@@ -37,3 +37,5 @@ Produce a structured report. Use the section relevant to the opportunity type: {
 ---
 
 Apply the section relevant to the opportunity type: {OPP_TYPE}. Use bullets. Be specific. Cite evidence from the data above.
+
+Gong call data (briefs, key points, next steps, transcripts) is included above where available — draw on it for customer sentiment, objections raised on calls, competitive mentions, pricing discussions, and engagement quality signals.

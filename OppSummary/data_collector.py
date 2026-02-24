@@ -216,6 +216,30 @@ ORDER BY t.[TrialDate__c] DESC
 """
         return self._execute_sf(sql.strip())
 
+    def get_gong_calls(self, opp_id: str) -> list[dict]:
+        """Fetch all Gong calls linked to this opportunity via the junction table."""
+        sql = f"""
+SELECT
+    c.[Id],
+    c.[Name],
+    c.[Gong__Call_Start__c],
+    c.[Gong__Call_Duration__c],
+    c.[Call_Transcript__c],
+    c.[Gong__Call_Brief__c],
+    c.[Gong__Call_Key_Points__c],
+    c.[Gong__Call_Highlights_Next_Steps__c],
+    c.[Gong__View_call__c],
+    c.[Gong__Participants_Emails__c],
+    ro.[Gong__Primary_Opportunity__c] AS IsPrimaryOpportunity
+FROM [Gong__Gong_Call__c] c
+INNER JOIN [Gong__Related_Opportunity__c] ro
+    ON ro.[Gong__Gong_Interaction__c] = c.[Id]
+WHERE ro.[Gong__Related_Entity_ID__c] = '{opp_id}'
+  AND c.[IsDeleted] = 0
+ORDER BY c.[Gong__Call_Start__c] DESC
+"""
+        return self._execute_sf(sql.strip())
+
     def get_cloud_trials(self, opp_id: str) -> list[dict]:
         sql = f"""
 SELECT t.[Serial__c], t.[Cloud_AccountId__c], t.[DataSource__c], t.[Destination__c],
@@ -307,6 +331,7 @@ WHERE em.[ParentId] IN {self._in_clause(all_case_ids)}
             "jira_comments": [],
             "sync_trials": [],
             "cloud_trials": [],
+            "gong_calls": [],
             "errors": [],
         }
 
@@ -357,5 +382,10 @@ WHERE em.[ParentId] IN {self._in_clause(all_case_ids)}
             result["cloud_trials"] = self.get_cloud_trials(opp_id)
         except Exception as e:
             result["errors"].append(f"cloud trials: {e}")
+
+        try:
+            result["gong_calls"] = self.get_gong_calls(opp_id)
+        except Exception as e:
+            result["errors"].append(f"gong calls: {e}")
 
         return result

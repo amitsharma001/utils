@@ -8,5 +8,7 @@
   "max_emails_per_case": 5,
   "max_comments_per_case": 5,
   "max_jira_comments": 20,
-  "max_trial_rows": 10
+  "max_trial_rows": 10,
+  "max_gong_calls": 5,
+  "max_transcript_chars": 3000
 }

@@ -256,6 +256,43 @@ class Analyzer:
             lines.append("No Connect Cloud trial data.")
         lines.append("")
 
+        # --- Gong Calls ---
+        lines.append("=== GONG CALLS ===")
+        gong_calls = data.get("gong_calls", [])
+        max_gong = cfg.get("max_gong_calls", 5)
+        max_transcript = cfg.get("max_transcript_chars", 3000)
+
+        if gong_calls:
+            for call in gong_calls[:max_gong]:
+                call_date = call.get("Gong__Call_Start__c", "")
+                date_str = call_date.date().isoformat() if hasattr(call_date, "date") else str(call_date)[:10]
+                duration = call.get("Gong__Call_Duration__c")
+                primary = " [Primary Opportunity]" if call.get("IsPrimaryOpportunity") else ""
+                lines.append(f"\n  Call: {call.get('Name', '')} — {date_str}{primary}")
+                if duration:
+                    lines.append(f"    Duration: {duration} min")
+                participants = call.get("Gong__Participants_Emails__c")
+                if participants:
+                    lines.append(f"    Participants: {participants}")
+                url = call.get("Gong__View_call__c")
+                if url:
+                    lines.append(f"    Gong URL: {url}")
+                brief = self._trunc(call.get("Gong__Call_Brief__c"), 1000)
+                if brief:
+                    lines.append(f"    Brief: {brief}")
+                key_points = self._trunc(call.get("Gong__Call_Key_Points__c"), 1000)
+                if key_points:
+                    lines.append(f"    Key Points: {key_points}")
+                next_steps = self._trunc(call.get("Gong__Call_Highlights_Next_Steps__c"), 800)
+                if next_steps:
+                    lines.append(f"    Next Steps: {next_steps}")
+                transcript = self._trunc(call.get("Call_Transcript__c"), max_transcript)
+                if transcript:
+                    lines.append(f"    Transcript:\n{transcript}")
+        else:
+            lines.append("No Gong calls found for this opportunity.")
+        lines.append("")
+
         # --- Analysis instructions (loaded from analysis_instructions.md) ---
         lines.append(instructions_text)
 

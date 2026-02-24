@@ -196,6 +196,20 @@ def _gather_and_display(opp: dict, collector, config: dict, mode: str) -> dict:
     except Exception as e:
         _step("Connect Cloud trials...", f"ERROR: {e}")
 
+    # Gong calls
+    gong_calls = []
+    try:
+        gong_calls = collector.get_gong_calls(opp["Id"])
+        n = len(gong_calls)
+        _step("Gong calls...", f"{n} found" if n > 0 else "None found")
+        for call in gong_calls:
+            call_date = call.get("Gong__Call_Start__c", "")
+            date_str = call_date.date().isoformat() if hasattr(call_date, "date") else str(call_date)[:10]
+            primary = " [Primary]" if call.get("IsPrimaryOpportunity") else ""
+            print(f"    {date_str}  {call.get('Name', '')}{primary}", flush=True)
+    except Exception as e:
+        _step("Gong calls...", f"ERROR: {e}")
+
     return {
         "opp": opp,
         "opp_type": _get_opp_type(opp),
@@ -208,6 +222,7 @@ def _gather_and_display(opp: dict, collector, config: dict, mode: str) -> dict:
         "jira_comments": jira_comments,
         "sync_trials": sync_trials,
         "cloud_trials": cloud_trials,
+        "gong_calls": gong_calls,
         "errors": [],
     }
 
